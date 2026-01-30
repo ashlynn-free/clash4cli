@@ -1,0 +1,84 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Press q to quit"
+  help: "Help"
+
+tabs:
+  nodes: "Nodes"
+  subscription: "Subscriptions"
+  settings: "Settings"
+  logs: "Logs"
+
+nodes:
+  name: "Name"
+  type: "Type"
+  latency: "Latency"
+  speed: "Speed"
+  status: "Status"
+  no_nodes: "No nodes available. Add a subscription first."
+  testing: "Testing..."
+  select: "Select"
+  test_all: "Test All"
+  connected: "Connected"
+  timeout: "Timeout"
+  unknown: "Unknown"
+
+subscription:
+  name: "Name"
+  url: "URL"
+  node_count: "Nodes"
+  last_update: "Last Update"
+  add: "Add"
+  delete: "Delete"
+  update: "Update"
+  update_all: "Update All"
+  no_subs: "No subscriptions. Press 'a' to add URL or 'z' to paste."
+  updating: "Updating..."
+  input_url: "Enter subscription URL:"
+  input_name: "Enter subscription name:"
+  input_content: "Paste subscription content:"
+
+settings:
+  socks_port: "SOCKS5 Port"
+  http_port: "HTTP Port"
+  language: "Language"
+  concurrent: "Concurrent Tests"
+  timeout: "Test Timeout"
+  server_display: "Server column (Host:Port)"
+  save: "Save"
+  saved: "Settings saved!"
+
+logs:
+  clear: "Clear"
+  no_logs: "No logs yet."
+  level: "Level"
+  time: "Time"
+  message: "Message"
+
+status:
+  disconnected: "Disconnected"
+  connecting: "Connecting..."
+  connected: "Connected"
+  connected_rule: "Connected (Rule)"
+  connected_global: "Connected (Global)"
+  error: "Error"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Back"
+  enter: "Enter to select"
+  tab: "Tab to switch"
+  arrows: "↑↓ to navigate"
+
+errors:
+  load_config: "Failed to load configuration"
+  save_config: "Failed to save configuration"
+  fetch_sub: "Failed to fetch subscription"
+  parse_sub: "Failed to parse subscription"
+  start_proxy: "Failed to start proxy"
+  stop_proxy: "Failed to stop proxy"
+  invalid_port: "Invalid port number"
+  no_node_selected: "No node selected. Go to \"%s\" tab and press Enter."

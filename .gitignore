@@ -1,0 +1,56 @@
+# Binaries (in root directory only)
+/c4c
+/c4cgo
+/rocket
+/rgo
+*.exe
+
+# Build output
+dist/
+.build/
+
+# Dependencies
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Config (user-specific)
+config.yaml
+
+# Third party binaries (download separately)
+third_party/mihomo/mihomo
+third_party/mihomo/mihomo-*
+third_party/proxychains/
+third_party/proxychains/**
+
+# Test output
+coverage.out
+*.test
+
+# Claude Code
+.claude/
+.mcp.json
+
+# Subscription URLs (sensitive)
+suburl.txt
+
+# Test commands
+cmd/test-*/
+
+
+.codex
+.claude
+AGENTS.md
+CLAUDE.md

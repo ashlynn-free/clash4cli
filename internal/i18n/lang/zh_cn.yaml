@@ -1,0 +1,84 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "按 q 退出"
+  help: "帮助"
+
+tabs:
+  nodes: "节点"
+  subscription: "订阅"
+  settings: "设置"
+  logs: "日志"
+
+nodes:
+  name: "名称"
+  type: "类型"
+  latency: "延迟"
+  speed: "速度"
+  status: "状态"
+  no_nodes: "暂无节点，请先添加订阅"
+  testing: "测试中..."
+  select: "选择"
+  test_all: "全部测试"
+  connected: "已连接"
+  timeout: "超时"
+  unknown: "未知"
+
+subscription:
+  name: "名称"
+  url: "链接"
+  node_count: "节点数"
+  last_update: "更新时间"
+  add: "添加"
+  delete: "删除"
+  update: "更新"
+  update_all: "全部更新"
+  no_subs: "暂无订阅，按 'a' 添加链接订阅，或按 'z' 粘贴内容"
+  updating: "更新中..."
+  input_url: "请输入订阅链接："
+  input_name: "请输入订阅名称："
+  input_content: "请粘贴订阅内容："
+
+settings:
+  socks_port: "SOCKS5 端口"
+  http_port: "HTTP 端口"
+  language: "语言"
+  concurrent: "并发测试数"
+  timeout: "测试超时"
+  server_display: "服务器地址:端口"
+  save: "保存"
+  saved: "设置已保存！"
+
+logs:
+  clear: "清空"
+  no_logs: "暂无日志"
+  level: "级别"
+  time: "时间"
+  message: "消息"
+
+status:
+  disconnected: "断开"
+  connecting: "连接中..."
+  connected: "已连接"
+  connected_rule: "已连接（规则）"
+  connected_global: "已连接（全局）"
+  error: "错误"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "回车确认"
+  cancel: "Esc取消"
+  back: "返回"
+  enter: "回车选择"
+  tab: "Tab 切换"
+  arrows: "↑↓ 导航"
+
+errors:
+  load_config: "加载配置失败"
+  save_config: "保存配置失败"
+  fetch_sub: "获取订阅失败"
+  parse_sub: "解析订阅失败"
+  start_proxy: "启动代理失败"
+  stop_proxy: "停止代理失败"
+  invalid_port: "无效端口号"
+  no_node_selected: "未选择节点：请先进入「%s」页选中一个节点并回车"

@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test + Build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: PII scan
+        run: bash scripts/pii_scan.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/go-cache
+            .build/go-mod-cache
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+
+      - name: Test
+        run: make test
+
+      - name: Build (current platform)
+        run: make build
+
+  package-linux-amd64:
+    name: Package linux/amd64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/go-cache
+            .build/go-mod-cache
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+
+      - name: Cache deps (mihomo/proxychains)
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/mihomo
+            third_party/proxychains
+          key: ${{ runner.os }}-deps-${{ hashFiles('Makefile') }}
+
+      - name: Fetch deps
+        run: make deps
+
+      - name: Build package
+        run: make linux/amd64
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash4cli-linux-amd64
+          path: dist/*.tar.gz
+
+  package-darwin:
+    name: Package darwin (amd64 + arm64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/go-cache
+            .build/go-mod-cache
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+
+      - name: Cache deps (mihomo/proxychains)
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/mihomo
+            third_party/proxychains
+          key: ${{ runner.os }}-deps-${{ hashFiles('Makefile') }}
+
+      - name: Fetch deps
+        run: make deps
+
+      - name: Build darwin/amd64 package
+        run: make darwin/amd64
+
+      - name: Build darwin/arm64 package
+        run: make darwin/arm64
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash4cli-darwin
+          path: dist/*.tar.gz
