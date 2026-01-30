@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Nhấn q để thoát"
+  help: "Trợ giúp"
+
+tabs:
+  nodes: "Nút"
+  subscription: "Đăng ký"
+  settings: "Cài đặt"
+  logs: "Nhật ký"
+
+nodes:
+  name: "Tên"
+  type: "Loại"
+  latency: "Độ trễ"
+  speed: "Tốc độ"
+  status: "Trạng thái"
+  no_nodes: "Không có nút. Hãy thêm đăng ký trước."
+  testing: "Đang kiểm tra..."
+  select: "Chọn"
+  test_all: "Kiểm tra tất cả"
+  connected: "Đã kết nối"
+  timeout: "Hết thời gian"
+  unknown: "Không rõ"
+
+subscription:
+  name: "Tên"
+  url: "URL"
+  node_count: "Nút"
+  last_update: "Cập nhật cuối"
+  add: "Thêm"
+  delete: "Xóa"
+  update: "Cập nhật"
+  update_all: "Cập nhật tất cả"
+  no_subs: "Chưa có đăng ký. Nhấn 'a' để thêm URL hoặc 'z' để dán."
+  updating: "Đang cập nhật..."
+  input_url: "Nhập URL đăng ký:"
+  input_name: "Nhập tên đăng ký:"
+  input_content: "Dán nội dung đăng ký:"
+
+settings:
+  socks_port: "Cổng SOCKS5"
+  http_port: "Cổng HTTP"
+  allow_lan: "Cho phép kết nối LAN"
+  language: "Ngôn ngữ"
+  concurrent: "Kiểm thử đồng thời"
+  timeout: "Thời gian chờ kiểm thử"
+  server_display: "Cột Server (Host:Port)"
+  restart_core: "Khởi động lại lõi"
+  on: "Bật"
+  off: "Tắt"
+  save: "Lưu"
+  saved: "Đã lưu cài đặt!"
+
+logs:
+  clear: "Xóa"
+  no_logs: "Chưa có nhật ký."
+  level: "Mức"
+  time: "Thời gian"
+  message: "Thông điệp"
+
+status:
+  disconnected: "Đã ngắt"
+  connecting: "Đang kết nối..."
+  connected: "Đã kết nối"
+  connected_rule: "Đã kết nối (Quy tắc)"
+  connected_global: "Đã kết nối (Toàn cục)"
+  error: "Lỗi"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Quay lại"
+  enter: "Enter để chọn"
+  tab: "Tab để chuyển"
+  arrows: "↑↓ để điều hướng"
+
+errors:
+  load_config: "Không thể tải cấu hình"
+  save_config: "Không thể lưu cấu hình"
+  fetch_sub: "Không thể lấy đăng ký"
+  parse_sub: "Không thể phân tích đăng ký"
+  start_proxy: "Không thể khởi động proxy"
+  stop_proxy: "Không thể dừng proxy"
+  invalid_port: "Số cổng không hợp lệ"
+  no_node_selected: "Chưa chọn nút. Vào tab \"%s\" và nhấn Enter."

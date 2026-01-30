@@ -20,10 +20,11 @@ type App struct {
 	nodeMgr    *node.Manager
 	proxyCtrl  *proxy.Controller
 	lock       *instanceLock
+	version    string
 }
 
 // New creates a new application instance
-func New() (*App, error) {
+func New(version string) (*App, error) {
 	// Ensure all directories exist
 	if err := config.EnsureAllDirs(); err != nil {
 		return nil, fmt.Errorf("failed to create directories: %w", err)
@@ -76,6 +77,7 @@ func New() (*App, error) {
 		nodeMgr:    nodeMgr,
 		proxyCtrl:  proxyCtrl,
 		lock:       lock,
+		version:    version,
 	}
 	releaseLockOnError = false
 	return a, nil
@@ -83,7 +85,7 @@ func New() (*App, error) {
 
 // Run starts the TUI application
 func (a *App) Run() error {
-	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.proxyCtrl)
+	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.proxyCtrl, a.version)
 
 	p := tea.NewProgram(
 		model,
@@ -98,9 +100,6 @@ func (a *App) Run() error {
 // Cleanup performs cleanup on shutdown
 func (a *App) Cleanup() {
 	logger.Info("clash4cli shutting down")
-	if a.proxyCtrl != nil {
-		_ = a.proxyCtrl.Stop()
-	}
 	logger.Close()
 	if a.lock != nil {
 		a.lock.release()

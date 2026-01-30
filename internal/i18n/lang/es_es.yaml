@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Pulsa q para salir"
+  help: "Ayuda"
+
+tabs:
+  nodes: "Nodos"
+  subscription: "Suscripciones"
+  settings: "Ajustes"
+  logs: "Logs"
+
+nodes:
+  name: "Nombre"
+  type: "Tipo"
+  latency: "Latencia"
+  speed: "Velocidad"
+  status: "Estado"
+  no_nodes: "No hay nodos disponibles. Añade una suscripción primero."
+  testing: "Probando..."
+  select: "Seleccionar"
+  test_all: "Probar todo"
+  connected: "Conectado"
+  timeout: "Tiempo de espera"
+  unknown: "Desconocido"
+
+subscription:
+  name: "Nombre"
+  url: "URL"
+  node_count: "Nodos"
+  last_update: "Última actualización"
+  add: "Añadir"
+  delete: "Eliminar"
+  update: "Actualizar"
+  update_all: "Actualizar todo"
+  no_subs: "No hay suscripciones. Pulsa 'a' para añadir URL o 'z' para pegar."
+  updating: "Actualizando..."
+  input_url: "Introduce la URL de la suscripción:"
+  input_name: "Introduce el nombre de la suscripción:"
+  input_content: "Pega el contenido de la suscripción:"
+
+settings:
+  socks_port: "Puerto SOCKS5"
+  http_port: "Puerto HTTP"
+  allow_lan: "Permitir conexiones LAN"
+  language: "Idioma"
+  concurrent: "Pruebas simultáneas"
+  timeout: "Tiempo de espera"
+  server_display: "Columna Server (Host:Port)"
+  restart_core: "Reiniciar núcleo"
+  on: "Activado"
+  off: "Desactivado"
+  save: "Guardar"
+  saved: "¡Ajustes guardados!"
+
+logs:
+  clear: "Borrar"
+  no_logs: "Aún no hay logs."
+  level: "Nivel"
+  time: "Hora"
+  message: "Mensaje"
+
+status:
+  disconnected: "Desconectado"
+  connecting: "Conectando..."
+  connected: "Conectado"
+  connected_rule: "Conectado (Reglas)"
+  connected_global: "Conectado (Global)"
+  error: "Error"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Atrás"
+  enter: "Enter para seleccionar"
+  tab: "Tab para cambiar"
+  arrows: "↑↓ para navegar"
+
+errors:
+  load_config: "No se pudo cargar la configuración"
+  save_config: "No se pudo guardar la configuración"
+  fetch_sub: "No se pudo obtener la suscripción"
+  parse_sub: "No se pudo analizar la suscripción"
+  start_proxy: "No se pudo iniciar el proxy"
+  stop_proxy: "No se pudo detener el proxy"
+  invalid_port: "Número de puerto no válido"
+  no_node_selected: "No hay nodo seleccionado. Ve a la pestaña \"%s\" y pulsa Enter."

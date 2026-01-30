@@ -55,7 +55,7 @@ var (
 
 	// Content area
 	ContentArea = lipgloss.NewStyle().
-			Padding(1, 2)
+			Padding(0, 0)
 
 	// Table styles
 	TableHeader = lipgloss.NewStyle().

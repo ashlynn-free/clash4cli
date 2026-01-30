@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Appuyez sur q pour quitter"
+  help: "Aide"
+
+tabs:
+  nodes: "Nœuds"
+  subscription: "Abonnements"
+  settings: "Paramètres"
+  logs: "Logs"
+
+nodes:
+  name: "Nom"
+  type: "Type"
+  latency: "Latence"
+  speed: "Vitesse"
+  status: "Statut"
+  no_nodes: "Aucun nœud disponible. Ajoutez d'abord un abonnement."
+  testing: "Test en cours..."
+  select: "Sélectionner"
+  test_all: "Tout tester"
+  connected: "Connecté"
+  timeout: "Délai dépassé"
+  unknown: "Inconnu"
+
+subscription:
+  name: "Nom"
+  url: "URL"
+  node_count: "Nœuds"
+  last_update: "Dernière mise à jour"
+  add: "Ajouter"
+  delete: "Supprimer"
+  update: "Mettre à jour"
+  update_all: "Tout mettre à jour"
+  no_subs: "Aucun abonnement. Appuyez sur 'a' pour ajouter une URL ou 'z' pour coller."
+  updating: "Mise à jour..."
+  input_url: "Entrez l'URL de l'abonnement :"
+  input_name: "Entrez le nom de l'abonnement :"
+  input_content: "Collez le contenu de l'abonnement :"
+
+settings:
+  socks_port: "Port SOCKS5"
+  http_port: "Port HTTP"
+  allow_lan: "Autoriser les connexions LAN"
+  language: "Langue"
+  concurrent: "Tests simultanés"
+  timeout: "Délai du test"
+  server_display: "Colonne Server (Host:Port)"
+  restart_core: "Redémarrer le cœur"
+  on: "Activé"
+  off: "Désactivé"
+  save: "Enregistrer"
+  saved: "Paramètres enregistrés !"
+
+logs:
+  clear: "Effacer"
+  no_logs: "Aucun log pour le moment."
+  level: "Niveau"
+  time: "Heure"
+  message: "Message"
+
+status:
+  disconnected: "Déconnecté"
+  connecting: "Connexion..."
+  connected: "Connecté"
+  connected_rule: "Connecté (Règles)"
+  connected_global: "Connecté (Global)"
+  error: "Erreur"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Retour"
+  enter: "Enter pour sélectionner"
+  tab: "Tab pour changer"
+  arrows: "↑↓ pour naviguer"
+
+errors:
+  load_config: "Impossible de charger la configuration"
+  save_config: "Impossible de sauvegarder la configuration"
+  fetch_sub: "Impossible de récupérer l'abonnement"
+  parse_sub: "Impossible d'analyser l'abonnement"
+  start_proxy: "Impossible de démarrer le proxy"
+  stop_proxy: "Impossible d'arrêter le proxy"
+  invalid_port: "Numéro de port invalide"
+  no_node_selected: "Aucun nœud sélectionné. Allez dans l'onglet \"%s\" et appuyez sur Enter."

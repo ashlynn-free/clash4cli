@@ -21,6 +21,9 @@ type SettingsErrorMsg struct {
 	Error error
 }
 
+// RestartCoreMsg requests restarting the proxy core (mihomo).
+type RestartCoreMsg struct{}
+
 type settingsFlashTickMsg struct {
 	id int
 }
@@ -65,8 +68,20 @@ type selectOption struct {
 }
 
 var languageOptions = []selectOption{
-	{label: "English", value: "en_us"},
-	{label: "简体中文", value: "zh_cn"},
+	{label: "🇺🇸 English", value: "en_us"},
+	{label: "🇨🇳 简体中文", value: "zh_cn"},
+	{label: "🇨🇳 繁體中文", value: "zh_tw"},
+	{label: "🇷🇺 Русский", value: "ru_ru"},
+	{label: "🇯🇵 日本語", value: "ja_jp"},
+	{label: "🇰🇷 한국어", value: "ko_kr"},
+	{label: "🇪🇸 Español", value: "es_es"},
+	{label: "🇧🇷 Português (Brasil)", value: "pt_br"},
+	{label: "🇫🇷 Français", value: "fr_fr"},
+	{label: "🇩🇪 Deutsch", value: "de_de"},
+	{label: "🇮🇹 Italiano", value: "it_it"},
+	{label: "🇮🇩 Bahasa Indonesia", value: "id_id"},
+	{label: "🇻🇳 Tiếng Việt", value: "vi_vn"},
+	{label: "🇹🇷 Türkçe", value: "tr_tr"},
 }
 
 var serverDisplayOptions = []selectOption{
@@ -80,6 +95,15 @@ func NewSettingsTab(cfg *config.Config) *SettingsTab {
 	mixedPortInput := textinput.New()
 	mixedPortInput.SetValue(fmt.Sprintf("%d", cfg.Proxy.MixedPort))
 	mixedPortInput.CharLimit = 5
+
+	allowLanIdx := 0
+	if !cfg.Proxy.AllowLan {
+		allowLanIdx = 1
+	}
+	allowLanOptions := []selectOption{
+		{label: i18n.M().Settings.On, value: "true"},
+		{label: i18n.M().Settings.Off, value: "false"},
+	}
 
 	concurrentInput := textinput.New()
 	concurrentInput.SetValue(fmt.Sprintf("%d", cfg.SpeedTest.Concurrent))
@@ -108,6 +132,13 @@ func NewSettingsTab(cfg *config.Config) *SettingsTab {
 			fieldType: FieldTypeInput,
 			input:     mixedPortInput,
 			key:       "mixed_port",
+		},
+		{
+			label:       i18n.M().Settings.AllowLan,
+			fieldType:   FieldTypeSelect,
+			key:         "allow_lan",
+			options:     allowLanOptions,
+			selectedIdx: allowLanIdx,
 		},
 		{
 			label:       i18n.M().Settings.Language,
@@ -156,12 +187,18 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
 			t.focusNext()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			if t.focusedField == len(t.fields) {
+			switch t.focusedField {
+			case len(t.fields):
 				// Save button
 				return t, t.saveSettings()
+			case len(t.fields) + 1:
+				// Restart core button
+				return t, func() tea.Msg { return RestartCoreMsg{} }
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+s"))):
 			return t, t.saveSettings()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+r"))):
+			return t, func() tea.Msg { return RestartCoreMsg{} }
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			// For select fields, move selection left
 			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeSelect {
@@ -248,7 +285,7 @@ func (t *SettingsTab) focusNext() {
 		t.fields[t.focusedField].input.Blur()
 	}
 	t.focusedField++
-	if t.focusedField > len(t.fields) {
+	if t.focusedField > len(t.fields)+1 {
 		t.focusedField = 0
 	}
 	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
@@ -265,7 +302,7 @@ func (t *SettingsTab) focusPrev() {
 	}
 	t.focusedField--
 	if t.focusedField < 0 {
-		t.focusedField = len(t.fields)
+		t.focusedField = len(t.fields) + 1
 	}
 	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
 		t.fields[t.focusedField].input.Focus()
@@ -338,6 +375,18 @@ func (t *SettingsTab) View() string {
 	}
 	content += saveLabel + "\n"
 
+	// Restart core button
+	restartLabel := i18n.M().Settings.RestartCore
+	if restartLabel == "" {
+		restartLabel = "Restart core"
+	}
+	if t.focusedField == len(t.fields)+1 {
+		restartLabel = styles.StatusConnected.Render("▶ [" + restartLabel + "]")
+	} else {
+		restartLabel = styles.Muted.Render("  [" + restartLabel + "]")
+	}
+	content += restartLabel + "\n"
+
 	// Message
 	if t.message != "" && t.messageShow {
 		if t.messageType == "success" {
@@ -351,28 +400,27 @@ func (t *SettingsTab) View() string {
 	help := "\n\n" +
 		styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" navigate  ") +
 		styles.HelpKey.Render("←/→") + styles.HelpText.Render(" select  ") +
-		styles.HelpKey.Render("Ctrl+S") + styles.HelpText.Render(" save")
+		styles.HelpKey.Render("Ctrl+S") + styles.HelpText.Render(" save  ") +
+		styles.HelpKey.Render("Ctrl+R") + styles.HelpText.Render(" restart")
 
 	return styles.ContentArea.Render(content + help)
 }
 
 func (t *SettingsTab) renderSelect(field settingField, focused bool) string {
-	var result string
-	for i, opt := range field.options {
-		if i == field.selectedIdx {
-			if focused {
-				result += styles.SelectOptionActive.Render(" " + opt.label + " ")
-			} else {
-				result += styles.SelectOptionSelected.Render(" " + opt.label + " ")
-			}
-		} else {
-			result += styles.SelectOption.Render(" " + opt.label + " ")
-		}
-		if i < len(field.options)-1 {
-			result += "  "
-		}
+	if len(field.options) == 0 {
+		return ""
 	}
-	return result
+	if field.selectedIdx < 0 || field.selectedIdx >= len(field.options) {
+		field.selectedIdx = 0
+	}
+	opt := field.options[field.selectedIdx]
+	label := " " + opt.label + " "
+	if focused {
+		label = styles.SelectOptionActive.Render(label)
+	} else {
+		label = styles.SelectOptionSelected.Render(label)
+	}
+	return styles.Muted.Render("◀") + " " + label + " " + styles.Muted.Render("▶")
 }
 
 // SetSize sets the tab size
@@ -397,6 +445,16 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 					return SettingsErrorMsg{Error: fmt.Errorf("invalid mixed port: %q", field.input.Value())}
 				}
 				t.cfg.Proxy.MixedPort = port
+			case "allow_lan":
+				v := field.options[field.selectedIdx].value
+				switch v {
+				case "true":
+					t.cfg.Proxy.AllowLan = true
+				case "false":
+					t.cfg.Proxy.AllowLan = false
+				default:
+					return SettingsErrorMsg{Error: fmt.Errorf("invalid allow_lan value: %q", v)}
+				}
 			case "language":
 				lang := field.options[field.selectedIdx].value
 				t.cfg.Language = lang

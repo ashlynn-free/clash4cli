@@ -3,10 +3,12 @@ package proxy
 import (
 	"bufio"
 	"bytes"
-	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,10 +25,22 @@ import (
 
 // LockFile represents the proxy.lock file content
 type LockFile struct {
-	Port    int    `json:"port"`
-	APIPort int    `json:"api_port"`
-	PID     int    `json:"pid"`
-	Node    string `json:"node,omitempty"`
+	Port       int    `json:"port"`
+	APIPort    int    `json:"api_port"`
+	PID        int    `json:"pid"`
+	SubID      string `json:"sub_id,omitempty"`
+	Node       string `json:"node,omitempty"`
+	NodeServer string `json:"node_server,omitempty"`
+	NodePort   int    `json:"node_port,omitempty"`
+	NodeType   string `json:"node_type,omitempty"`
+	ProxyHost  string `json:"proxy_host,omitempty"`
+	APIHost    string `json:"api_host,omitempty"`
+	ConfigPath string `json:"config_path,omitempty"`
+	WorkDir    string `json:"work_dir,omitempty"`
+	LogPath    string `json:"log_path,omitempty"`
+	Secret     string `json:"secret,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	Detached   bool   `json:"detached,omitempty"`
 }
 
 // Status represents the proxy status
@@ -69,36 +83,106 @@ type Controller struct {
 	cmd        *exec.Cmd
 	status     Status
 	mu         sync.RWMutex
-	cancel     context.CancelFunc
 	logCh      chan LogEntry
 	cfg        *config.Config
 	configPath string
+	pid        int
+	port       int
+	apiPort    int
+	apiHost    string
+	proxyHost  string
+	secret     string
+	logPath    string
 }
 
 // NewController creates a new proxy controller
 func NewController(cfg *config.Config) *Controller {
-	return &Controller{
-		status: StatusStopped,
-		logCh:  make(chan LogEntry, 100),
-		cfg:    cfg,
+	c := &Controller{
+		status:    StatusStopped,
+		logCh:     make(chan LogEntry, 100),
+		cfg:       cfg,
+		apiHost:   "127.0.0.1",
+		proxyHost: "127.0.0.1",
 	}
+	c.syncFromLockFile()
+	return c
 }
 
-// Start starts the proxy with given nodes
-func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription.Node) error {
+// Start starts the proxy with given nodes, and records the active subscription + node state into proxy.lock.
+func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode *subscription.Node) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// If a previous c4c session left mihomo running, treat it as already running.
 	if c.status == StatusRunning || c.status == StatusStarting {
 		c.logCh <- LogEntry{Level: "warn", Message: "proxy already running"}
 		return fmt.Errorf("proxy already running")
 	}
+	if lock, err := ReadLockFile(); err == nil && lock != nil {
+		if c.lockFileLooksAlive(lock) {
+			c.applyLockFileLocked(lock)
+			c.logCh <- LogEntry{Level: "warn", Message: "proxy already running (detected from proxy.lock)"}
+			return fmt.Errorf("proxy already running")
+		}
+		// Stale lock: best-effort remove.
+		c.removeLockFile()
+	}
 
 	c.status = StatusStarting
-	c.logCh <- LogEntry{Level: "info", Message: "Starting proxy..."}
+	c.logCh <- LogEntry{Level: "info", Message: "Starting proxy (detached)..."}
+
+	secret, err := generateSecret()
+	if err != nil {
+		c.status = StatusError
+		return fmt.Errorf("failed to generate api secret: %w", err)
+	}
+
+	// Select ports (multi-user safe):
+	// - mixed-port uses configured port, but falls back to the next free one if occupied.
+	// - external-controller (API) must be unique per core; default range starts at 9090.
+	proxyListenHost := "127.0.0.1"
+	proxyDialHost := "127.0.0.1"
+	preferredMixedPort := 17890
+	if c.cfg != nil {
+		if c.cfg.Proxy.MixedPort > 0 {
+			preferredMixedPort = c.cfg.Proxy.MixedPort
+		}
+		if c.cfg.Proxy.AllowLan {
+			bind := strings.TrimSpace(c.cfg.Proxy.BindAddress)
+			if bind == "" {
+				bind = "0.0.0.0"
+			}
+			proxyListenHost = bind
+			// If the user binds to a specific interface, dial that address too.
+			if bind != "0.0.0.0" && bind != "127.0.0.1" && bind != "::" && bind != "" {
+				proxyDialHost = bind
+			}
+		}
+	}
+
+	mixedPort, err := pickTCPPort(proxyListenHost, preferredMixedPort, 200, nil)
+	if err != nil {
+		c.status = StatusError
+		return fmt.Errorf("failed to pick a free mixed-port: %w", err)
+	}
+
+	apiHost := c.apiHost
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	apiPort, err := pickTCPPort(apiHost, 9090, 200, map[int]struct{}{mixedPort: {}})
+	if err != nil {
+		c.status = StatusError
+		return fmt.Errorf("failed to pick a free api port: %w", err)
+	}
+
+	c.port = mixedPort
+	c.apiPort = apiPort
+	c.proxyHost = proxyDialHost
+	c.secret = secret
 
 	// Generate mihomo config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, apiHost)
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to generate config: %v", err)
@@ -106,6 +190,7 @@ func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription
 		logger.Error("%s", errMsg)
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
+	mihomoConfig.Secret = secret
 
 	// Save config
 	configPath, err := SaveConfig(mihomoConfig)
@@ -140,73 +225,120 @@ func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription
 		return err
 	}
 
-	// Create context for cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	c.cancel = cancel
-
-	// Start mihomo process
-	c.cmd = exec.CommandContext(ctx, mihomoPath, "-d", workDir, "-f", c.configPath)
-	c.cmd.Dir = workDir
-
-	// Capture stdout and stderr
-	stdout, err := c.cmd.StdoutPipe()
+	logPath, err := prepareMihomoLogFile()
 	if err != nil {
 		c.status = StatusError
-		errMsg := fmt.Sprintf("failed to get stdout pipe: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
-		return fmt.Errorf("failed to get stdout pipe: %w", err)
+		return fmt.Errorf("failed to prepare mihomo log file: %w", err)
 	}
+	c.logPath = logPath
 
-	stderr, err := c.cmd.StderrPipe()
+	// Start mihomo process in detached mode so closing c4c won't stop it.
+	cmd := exec.Command(mihomoPath, "-d", workDir, "-f", c.configPath)
+	cmd.Dir = workDir
+	configureDetachedCommand(cmd)
+
+	// Redirect stdio to files (no pipes) so the child won't die on SIGPIPE when
+	// the UI exits.
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
 	if err != nil {
 		c.status = StatusError
-		errMsg := fmt.Sprintf("failed to get stderr pipe: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
-		return fmt.Errorf("failed to get stderr pipe: %w", err)
+		return fmt.Errorf("failed to open %s: %w", os.DevNull, err)
 	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		_ = devNull.Close()
+		c.status = StatusError
+		return fmt.Errorf("failed to open mihomo log file: %w", err)
+	}
+	cmd.Stdin = devNull
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
-	// Start reading logs
-	go c.readLogs(stdout, "stdout")
-	go c.readLogs(stderr, "stderr")
+	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Executing (detached): %s -d %s -f %s", mihomoPath, workDir, c.configPath)}
 
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Executing: %s -d %s -f %s", mihomoPath, workDir, c.configPath)}
-
-	if err := c.cmd.Start(); err != nil {
+	if err := cmd.Start(); err != nil {
+		_ = devNull.Close()
+		_ = logFile.Close()
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to start mihomo: %v", err)
 		c.logCh <- LogEntry{Level: "error", Message: errMsg}
 		logger.Error("%s", errMsg)
 		return fmt.Errorf("failed to start mihomo: %w", err)
 	}
-	startedCmd := c.cmd
 
-	logger.Info("mihomo process started with PID: %d", c.cmd.Process.Pid)
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("mihomo started (PID: %d)", c.cmd.Process.Pid)}
+	// Close parent copies of file descriptors; the child keeps its own.
+	_ = devNull.Close()
+	_ = logFile.Close()
+
+	c.cmd = cmd
+	c.pid = cmd.Process.Pid
+
+	logger.Info("mihomo process started (detached) with PID: %d", c.pid)
+	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("mihomo started (PID: %d)", c.pid)}
 	c.status = StatusRunning
 
-	// Create lock file
+	// Create lock file (used by c4cgo and by the next c4c session to re-attach).
 	nodeName := ""
+	nodeServer := ""
+	nodePort := 0
+	nodeType := ""
 	if selectedNode != nil {
 		nodeName = selectedNode.Name
+		nodeServer = selectedNode.Server
+		nodePort = selectedNode.Port
+		nodeType = selectedNode.Type
 	}
-	if err := c.createLockFile(c.cfg.Proxy.MixedPort, 9090, c.cmd.Process.Pid, nodeName); err != nil {
+	lock := LockFile{
+		Port:       c.port,
+		APIPort:    c.apiPort,
+		PID:        c.pid,
+		SubID:      subID,
+		Node:       nodeName,
+		NodeServer: nodeServer,
+		NodePort:   nodePort,
+		NodeType:   nodeType,
+		ProxyHost:  c.proxyHost,
+		APIHost:    c.apiHost,
+		ConfigPath: c.configPath,
+		WorkDir:    workDir,
+		LogPath:    c.logPath,
+		Secret:     c.secret,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339),
+		Detached:   true,
+	}
+	if err := writeLockFile(lock); err != nil {
 		logger.Warn("Failed to create lock file: %v", err)
 	}
 
-	// Wait for mihomo API to be ready and switch to selected node
+	startedPID := c.pid
+	startedCmd := c.cmd
+	selectedName := ""
 	if selectedNode != nil {
-		selectedName := selectedNode.Name
+		selectedName = selectedNode.Name
+	}
+	apiSecret := c.secret
+
+	// Wait for mihomo API to be ready and switch to selected node (best-effort).
+	if selectedName != "" {
 		go func() {
-			// Wait for mihomo to be ready (API available)
-			apiURL := "http://127.0.0.1:9090/proxies/Proxy"
+			apiURL := fmt.Sprintf("http://%s:%d/proxies/Proxy", apiHost, apiPort)
 			ready := false
 			for i := 0; i < 50; i++ {
 				time.Sleep(100 * time.Millisecond)
-				resp, err := http.Get(apiURL)
+				req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+				if err != nil {
+					continue
+				}
+				if apiSecret != "" {
+					req.Header.Set("Authorization", "Bearer "+apiSecret)
+				}
+				resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
 				if err == nil {
-					resp.Body.Close()
-					ready = true
-					break
+					_ = resp.Body.Close()
+					if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+						ready = true
+						break
+					}
 				}
 			}
 			if !ready {
@@ -216,13 +348,12 @@ func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription
 			}
 
 			c.mu.RLock()
-			isStale := c.cmd != startedCmd || c.status != StatusRunning
+			isStale := c.pid != startedPID || c.cmd != startedCmd || c.status != StatusRunning
 			c.mu.RUnlock()
 			if isStale {
 				return
 			}
 
-			// Switch our selector group to the selected node
 			if err := c.SwitchNode(selectedName); err != nil {
 				logger.Warn("Failed to switch to node %s: %v", selectedName, err)
 				c.logCh <- LogEntry{Level: "warn", Message: fmt.Sprintf("Failed to switch node: %v", err)}
@@ -230,13 +361,13 @@ func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription
 		}()
 	}
 
-	// Monitor process
-	go func(cmd *exec.Cmd) {
+	// Monitor process while this controller is alive (prevents zombies).
+	go func(pid int, cmd *exec.Cmd) {
 		err := cmd.Wait()
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		if c.cmd != cmd {
+		if c.pid != pid || c.cmd != cmd {
 			return
 		}
 
@@ -245,7 +376,7 @@ func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription
 			c.logCh <- LogEntry{Level: "info", Message: "mihomo stopped normally"}
 			c.removeLockFile()
 			c.cmd = nil
-			c.cancel = nil
+			c.pid = 0
 		} else if err != nil {
 			c.status = StatusError
 			errMsg := fmt.Sprintf("mihomo exited unexpectedly: %v", err)
@@ -253,15 +384,15 @@ func (c *Controller) Start(nodes []subscription.Node, selectedNode *subscription
 			logger.Error("%s", errMsg)
 			c.removeLockFile()
 			c.cmd = nil
-			c.cancel = nil
+			c.pid = 0
 		} else {
 			c.status = StatusStopped
 			c.logCh <- LogEntry{Level: "warn", Message: "mihomo exited without error but unexpectedly"}
 			c.removeLockFile()
 			c.cmd = nil
-			c.cancel = nil
+			c.pid = 0
 		}
-	}(startedCmd)
+	}(startedPID, startedCmd)
 
 	return nil
 }
@@ -271,23 +402,58 @@ func (c *Controller) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.status != StatusRunning && c.status != StatusStarting {
+	lock, err := ReadLockFile()
+	if err != nil || lock == nil {
+		c.status = StatusStopped
+		c.cmd = nil
+		c.pid = 0
 		return nil
 	}
 
-	logger.Info("stopping mihomo...")
+	if lock.PID <= 0 {
+		c.removeLockFile()
+		c.status = StatusStopped
+		return nil
+	}
+	if !isProcessAlive(lock.PID) {
+		c.removeLockFile()
+		c.status = StatusStopped
+		c.cmd = nil
+		c.pid = 0
+		return nil
+	}
+
+	if !processLooksLikeMihomo(lock.PID, lock.ConfigPath) {
+		return fmt.Errorf("refusing to kill pid %d: not recognized as mihomo (config=%q)", lock.PID, lock.ConfigPath)
+	}
+
+	logger.Info("stopping mihomo (pid=%d)...", lock.PID)
 	c.status = StatusStopping
+	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Stopping mihomo (PID: %d)...", lock.PID)}
 
-	if c.cancel != nil {
-		c.cancel()
+	killErr := terminateProcess(lock.PID, 2*time.Second)
+
+	if killErr != nil && isProcessAlive(lock.PID) {
+		// Still alive: keep lock + fields so c4cgo can continue to attach.
+		c.status = StatusError
+		c.pid = lock.PID
+		c.port = lock.Port
+		c.apiPort = lock.APIPort
+		if lock.APIHost != "" {
+			c.apiHost = lock.APIHost
+		}
+		if lock.ProxyHost != "" {
+			c.proxyHost = lock.ProxyHost
+		}
+		c.secret = lock.Secret
+		return killErr
 	}
 
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-	}
-
-	// Remove lock file
+	// Stopped successfully (or already dead).
 	c.removeLockFile()
+	c.cmd = nil
+	c.pid = 0
+	c.status = StatusStopped
 
 	logger.Info("mihomo stopped")
 	return nil
@@ -298,6 +464,36 @@ func (c *Controller) GetStatus() Status {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.status
+}
+
+// CurrentPort returns the currently active mixed port if the proxy core is running.
+// If it is not running (or unknown), it falls back to the configured port.
+func (c *Controller) CurrentPort() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.status == StatusRunning && c.port > 0 {
+		return c.port
+	}
+	if c.cfg != nil && c.cfg.Proxy.MixedPort > 0 {
+		return c.cfg.Proxy.MixedPort
+	}
+	return 0
+}
+
+// UpdateLockState best-effort updates the proxy.lock file with extra metadata for re-attach.
+// It does not start/stop the proxy core.
+func (c *Controller) UpdateLockState(subID string, node *subscription.Node) {
+	_ = updateLockFile(func(l *LockFile) {
+		if subID != "" {
+			l.SubID = subID
+		}
+		if node != nil {
+			l.Node = node.Name
+			l.NodeServer = node.Server
+			l.NodePort = node.Port
+			l.NodeType = node.Type
+		}
+	})
 }
 
 // LogChannel returns the log channel
@@ -385,9 +581,12 @@ func (c *Controller) Reload(nodes []subscription.Node, selectedNode *subscriptio
 	defer c.mu.Unlock()
 
 	// Generate new config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, c.apiHost)
 	if err != nil {
 		return fmt.Errorf("failed to generate config: %w", err)
+	}
+	if c.secret != "" {
+		mihomoConfig.Secret = c.secret
 	}
 
 	// Save config
@@ -419,7 +618,15 @@ func (c *Controller) SwitchGroup(groupName, entryName string) error {
 	}
 
 	// Call mihomo API to switch selector group
-	apiURL := fmt.Sprintf("http://127.0.0.1:9090/proxies/%s", groupName)
+	apiHost := c.apiHost
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	apiPort := c.apiPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	apiURL := fmt.Sprintf("http://%s:%d/proxies/%s", apiHost, apiPort, groupName)
 	payload := map[string]string{"name": entryName}
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -431,6 +638,9 @@ func (c *Controller) SwitchGroup(groupName, entryName string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.secret)
+	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
@@ -447,10 +657,9 @@ func (c *Controller) SwitchGroup(groupName, entryName string) error {
 	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Switched %s to: %s", groupName, entryName)}
 	logger.Info("Switched %s to: %s", groupName, entryName)
 
-	// Update lock file with new node name
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.createLockFile(c.cfg.Proxy.MixedPort, 9090, c.cmd.Process.Pid, entryName)
-	}
+	_ = updateLockFile(func(l *LockFile) {
+		l.Node = entryName
+	})
 
 	return nil
 }
@@ -468,7 +677,15 @@ func (c *Controller) SetMode(mode string) error {
 		return fmt.Errorf("invalid mode: %s (expected rule|global|direct)", mode)
 	}
 
-	apiURL := "http://127.0.0.1:9090/configs"
+	apiHost := c.apiHost
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	apiPort := c.apiPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	apiURL := fmt.Sprintf("http://%s:%d/configs", apiHost, apiPort)
 	payload := map[string]string{"mode": mode}
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -485,6 +702,9 @@ func (c *Controller) SetMode(mode string) error {
 			return fmt.Errorf("failed to create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if c.secret != "" {
+			req.Header.Set("Authorization", "Bearer "+c.secret)
+		}
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -511,28 +731,6 @@ func (c *Controller) SetMode(mode string) error {
 	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Mode switched to: %s", mode)}
 	logger.Info("Mode switched to: %s", mode)
 	return nil
-}
-
-// createLockFile creates the proxy.lock file
-func (c *Controller) createLockFile(port, apiPort, pid int, nodeName string) error {
-	lockPath, err := config.GetLockFilePath()
-	if err != nil {
-		return err
-	}
-
-	lockFile := LockFile{
-		Port:    port,
-		APIPort: apiPort,
-		PID:     pid,
-		Node:    nodeName,
-	}
-
-	data, err := json.MarshalIndent(lockFile, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(lockPath, data, 0644)
 }
 
 // removeLockFile removes the proxy.lock file
@@ -562,4 +760,161 @@ func ReadLockFile() (*LockFile, error) {
 	}
 
 	return &lockFile, nil
+}
+
+func writeLockFile(lockFile LockFile) error {
+	lockPath, err := config.GetLockFilePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(lockFile, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := lockPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpPath, lockPath); err != nil {
+		// Windows cannot rename over an existing file.
+		_ = os.Remove(lockPath)
+		return os.Rename(tmpPath, lockPath)
+	}
+	return nil
+}
+
+func updateLockFile(mut func(*LockFile)) error {
+	lockFile, err := ReadLockFile()
+	if err != nil {
+		return err
+	}
+	mut(lockFile)
+	return writeLockFile(*lockFile)
+}
+
+func (c *Controller) lockFileLooksAlive(lock *LockFile) bool {
+	if lock == nil {
+		return false
+	}
+	if lock.Port <= 0 || lock.Port >= 65536 || lock.PID <= 0 {
+		return false
+	}
+	proxyHost := lock.ProxyHost
+	if proxyHost == "" {
+		proxyHost = "127.0.0.1"
+	}
+	if !isTCPReachable(proxyHost, lock.Port) {
+		return false
+	}
+	if !isProcessAlive(lock.PID) {
+		return false
+	}
+	return true
+}
+
+func (c *Controller) applyLockFileLocked(lock *LockFile) {
+	c.status = StatusRunning
+	c.pid = lock.PID
+	c.port = lock.Port
+	c.apiPort = lock.APIPort
+	if lock.APIHost != "" {
+		c.apiHost = lock.APIHost
+	}
+	if lock.ProxyHost != "" {
+		c.proxyHost = lock.ProxyHost
+	}
+	c.configPath = lock.ConfigPath
+	c.logPath = lock.LogPath
+	c.secret = lock.Secret
+}
+
+func (c *Controller) syncFromLockFile() {
+	lock, err := ReadLockFile()
+	if err != nil || lock == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.lockFileLooksAlive(lock) {
+		c.applyLockFileLocked(lock)
+		logger.Info("Detected running mihomo from proxy.lock (pid=%d, port=%d)", lock.PID, lock.Port)
+		c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Detected running proxy core (PID: %d)", lock.PID)}
+		go c.monitorExternalProxy(lock.PID, lock.Port, lock.ProxyHost)
+		return
+	}
+
+	// Stale lock.
+	c.removeLockFile()
+}
+
+func (c *Controller) monitorExternalProxy(pid int, port int, host string) {
+	if pid <= 0 || port <= 0 {
+		return
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		alive := isProcessAlive(pid) && isTCPReachable(host, port)
+		if alive {
+			continue
+		}
+
+		c.mu.Lock()
+		if c.pid != pid || c.status != StatusRunning {
+			c.mu.Unlock()
+			return
+		}
+		c.status = StatusStopped
+		c.cmd = nil
+		c.pid = 0
+		c.removeLockFile()
+		c.mu.Unlock()
+
+		c.logCh <- LogEntry{Level: "warn", Message: "Proxy core stopped (detected)"} // best-effort
+		return
+	}
+}
+
+func isTCPReachable(host string, port int) bool {
+	addr := fmt.Sprintf("%s:%d", host, port)
+	conn, err := net.DialTimeout("tcp", addr, 800*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func generateSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func prepareMihomoLogFile() (string, error) {
+	logDir, err := config.GetLogDir()
+	if err != nil {
+		return "", err
+	}
+	if err := config.EnsureDir(logDir); err != nil {
+		return "", err
+	}
+
+	logPath := filepath.Join(logDir, "mihomo.log")
+	if info, err := os.Stat(logPath); err == nil && info.Mode().IsRegular() && info.Size() > 5*1024*1024 {
+		backup := logPath + ".1"
+		_ = os.Remove(backup)
+		_ = os.Rename(logPath, backup)
+	}
+	return logPath, nil
 }

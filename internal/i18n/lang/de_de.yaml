@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Drücke q zum Beenden"
+  help: "Hilfe"
+
+tabs:
+  nodes: "Knoten"
+  subscription: "Abonnements"
+  settings: "Einstellungen"
+  logs: "Logs"
+
+nodes:
+  name: "Name"
+  type: "Typ"
+  latency: "Latenz"
+  speed: "Geschwindigkeit"
+  status: "Status"
+  no_nodes: "Keine Knoten verfügbar. Füge zuerst ein Abo hinzu."
+  testing: "Teste..."
+  select: "Auswählen"
+  test_all: "Alle testen"
+  connected: "Verbunden"
+  timeout: "Zeitüberschreitung"
+  unknown: "Unbekannt"
+
+subscription:
+  name: "Name"
+  url: "URL"
+  node_count: "Knoten"
+  last_update: "Letztes Update"
+  add: "Hinzufügen"
+  delete: "Löschen"
+  update: "Aktualisieren"
+  update_all: "Alle aktualisieren"
+  no_subs: "Keine Abonnements. Drücke 'a' für URL oder 'z' zum Einfügen."
+  updating: "Aktualisiere..."
+  input_url: "Abo-URL eingeben:"
+  input_name: "Abo-Name eingeben:"
+  input_content: "Abo-Inhalt einfügen:"
+
+settings:
+  socks_port: "SOCKS5 Port"
+  http_port: "HTTP Port"
+  allow_lan: "LAN-Verbindungen erlauben"
+  language: "Sprache"
+  concurrent: "Gleichzeitige Tests"
+  timeout: "Test-Timeout"
+  server_display: "Server-Spalte (Host:Port)"
+  restart_core: "Core neu starten"
+  on: "An"
+  off: "Aus"
+  save: "Speichern"
+  saved: "Einstellungen gespeichert!"
+
+logs:
+  clear: "Leeren"
+  no_logs: "Noch keine Logs."
+  level: "Level"
+  time: "Zeit"
+  message: "Nachricht"
+
+status:
+  disconnected: "Getrennt"
+  connecting: "Verbinde..."
+  connected: "Verbunden"
+  connected_rule: "Verbunden (Regeln)"
+  connected_global: "Verbunden (Global)"
+  error: "Fehler"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Zurück"
+  enter: "Enter zum Auswählen"
+  tab: "Tab zum Wechseln"
+  arrows: "↑↓ zum Navigieren"
+
+errors:
+  load_config: "Konfiguration konnte nicht geladen werden"
+  save_config: "Konfiguration konnte nicht gespeichert werden"
+  fetch_sub: "Abo konnte nicht abgerufen werden"
+  parse_sub: "Abo konnte nicht geparst werden"
+  start_proxy: "Proxy konnte nicht gestartet werden"
+  stop_proxy: "Proxy konnte nicht gestoppt werden"
+  invalid_port: "Ungültige Portnummer"
+  no_node_selected: "Kein Knoten ausgewählt. Wechsle zum Tab \"%s\" und drücke Enter."

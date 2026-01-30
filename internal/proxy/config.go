@@ -16,9 +16,11 @@ type MihomoConfig struct {
 	Port               int              `yaml:"port,omitempty"`
 	SocksPort          int              `yaml:"socks-port,omitempty"`
 	AllowLan           bool             `yaml:"allow-lan"`
+	BindAddress        string           `yaml:"bind-address,omitempty"`
 	Mode               string           `yaml:"mode"`
 	LogLevel           string           `yaml:"log-level"`
 	ExternalController string           `yaml:"external-controller,omitempty"`
+	Secret             string           `yaml:"secret,omitempty"`
 	Proxies            []map[string]any `yaml:"proxies"`
 	ProxyGroups        []ProxyGroup     `yaml:"proxy-groups"`
 	Rules              []string         `yaml:"rules"`
@@ -34,13 +36,40 @@ type ProxyGroup struct {
 }
 
 // GenerateConfig generates mihomo configuration from nodes
-func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config) (*MihomoConfig, error) {
+func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, mixedPort int, apiPort int, apiHost string) (*MihomoConfig, error) {
+	if mixedPort <= 0 {
+		mixedPort = 17890
+		if cfg != nil && cfg.Proxy.MixedPort > 0 {
+			mixedPort = cfg.Proxy.MixedPort
+		}
+	}
+	allowLan := false
+	bindAddress := ""
+
+	if cfg != nil {
+		allowLan = cfg.Proxy.AllowLan
+		if allowLan {
+			bindAddress = cfg.Proxy.BindAddress
+			if bindAddress == "" {
+				bindAddress = "0.0.0.0"
+			}
+		}
+	}
+
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	if apiPort <= 0 {
+		apiPort = 9090
+	}
+
 	mihomoConfig := &MihomoConfig{
-		MixedPort:          cfg.Proxy.MixedPort, // Single port for both SOCKS5 and HTTP
-		AllowLan:           false,
+		MixedPort:          mixedPort, // Single port for both SOCKS5 and HTTP
+		AllowLan:           allowLan,
+		BindAddress:        bindAddress,
 		Mode:               "rule", // Drive all traffic via our "Proxy" selector group
 		LogLevel:           "info",
-		ExternalController: "127.0.0.1:9090",
+		ExternalController: fmt.Sprintf("%s:%d", apiHost, apiPort),
 		Proxies:            make([]map[string]any, 0, len(nodes)),
 		Rules: []string{
 			"MATCH,Proxy",

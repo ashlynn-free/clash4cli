@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Нажмите q, чтобы выйти"
+  help: "Помощь"
+
+tabs:
+  nodes: "Узлы"
+  subscription: "Подписки"
+  settings: "Настройки"
+  logs: "Логи"
+
+nodes:
+  name: "Имя"
+  type: "Тип"
+  latency: "Задержка"
+  speed: "Скорость"
+  status: "Статус"
+  no_nodes: "Нет доступных узлов. Сначала добавьте подписку."
+  testing: "Тестирование..."
+  select: "Выбрать"
+  test_all: "Тестировать все"
+  connected: "Подключено"
+  timeout: "Тайм-аут"
+  unknown: "Неизвестно"
+
+subscription:
+  name: "Имя"
+  url: "URL"
+  node_count: "Узлы"
+  last_update: "Последнее обновление"
+  add: "Добавить"
+  delete: "Удалить"
+  update: "Обновить"
+  update_all: "Обновить все"
+  no_subs: "Нет подписок. Нажмите 'a' чтобы добавить URL или 'z' чтобы вставить."
+  updating: "Обновление..."
+  input_url: "Введите URL подписки:"
+  input_name: "Введите имя подписки:"
+  input_content: "Вставьте содержимое подписки:"
+
+settings:
+  socks_port: "Порт SOCKS5"
+  http_port: "Порт HTTP"
+  allow_lan: "Разрешить подключения LAN"
+  language: "Язык"
+  concurrent: "Параллельные тесты"
+  timeout: "Тайм-аут теста"
+  server_display: "Колонка Server (Host:Port)"
+  restart_core: "Перезапустить ядро"
+  on: "Вкл"
+  off: "Выкл"
+  save: "Сохранить"
+  saved: "Настройки сохранены!"
+
+logs:
+  clear: "Очистить"
+  no_logs: "Логов пока нет."
+  level: "Уровень"
+  time: "Время"
+  message: "Сообщение"
+
+status:
+  disconnected: "Отключено"
+  connecting: "Подключение..."
+  connected: "Подключено"
+  connected_rule: "Подключено (Правила)"
+  connected_global: "Подключено (Глобально)"
+  error: "Ошибка"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Назад"
+  enter: "Enter — выбрать"
+  tab: "Tab — переключить"
+  arrows: "↑↓ — навигация"
+
+errors:
+  load_config: "Не удалось загрузить конфигурацию"
+  save_config: "Не удалось сохранить конфигурацию"
+  fetch_sub: "Не удалось получить подписку"
+  parse_sub: "Не удалось разобрать подписку"
+  start_proxy: "Не удалось запустить прокси"
+  stop_proxy: "Не удалось остановить прокси"
+  invalid_port: "Неверный номер порта"
+  no_node_selected: "Узел не выбран. Перейдите на вкладку \"%s\" и нажмите Enter."

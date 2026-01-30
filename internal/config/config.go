@@ -18,7 +18,9 @@ type Config struct {
 
 // ProxyConfig represents proxy port configuration
 type ProxyConfig struct {
-	MixedPort int `yaml:"mixed_port"` // Single port for both SOCKS5 and HTTP
+	MixedPort   int    `yaml:"mixed_port"` // Single port for both SOCKS5 and HTTP
+	AllowLan    bool   `yaml:"allow_lan"`
+	BindAddress string `yaml:"bind_address"`
 }
 
 // SpeedTestConfig represents speed test configuration
@@ -31,14 +33,17 @@ type SpeedTestConfig struct {
 type UIConfig struct {
 	// ServerDisplay controls whether the Nodes tab shows the "Server" column.
 	// Supported values: show | blur | off.
-	ServerDisplay string `yaml:"server_display"`
+	ServerDisplay        string `yaml:"server_display"`
+	ActiveSubscriptionID string `yaml:"active_subscription_id,omitempty"`
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Proxy: ProxyConfig{
-			MixedPort: 17890,
+			MixedPort:   17890,
+			AllowLan:    true,
+			BindAddress: "0.0.0.0",
 		},
 		Language: "en_us",
 		SpeedTest: SpeedTestConfig{

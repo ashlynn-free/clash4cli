@@ -16,8 +16,9 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 THIRD_PARTY_DIR="$PROJECT_DIR/third_party/proxychains"
 BUILD_DIR="$PROJECT_DIR/.build/proxychains"
 # Linux artifacts should run on "most" distros. Build them against an older glibc baseline.
-# CentOS 7 ships glibc 2.17 (a common portability target for x86_64).
-LINUX_DOCKER_IMAGE="${PROXYCHAINS_LINUX_DOCKER_IMAGE:-centos:7}"
+# - amd64: CentOS 7 ships glibc 2.17 (a common portability target).
+# - arm64: use a multi-arch RHEL-like base (glibc 2.28) for better compatibility than modern distros.
+LINUX_DOCKER_IMAGE="${PROXYCHAINS_LINUX_DOCKER_IMAGE:-}"
 LINUX_BUILD_MODE="${PROXYCHAINS_LINUX_BUILD_MODE:-auto}" # auto|docker|native
 
 usage() {
@@ -34,7 +35,7 @@ Options:
 Notes:
   - Requires build toolchain (cc, make) and network access to GitHub.
   - For linux cross-build via Docker, image can be overridden with:
-      PROXYCHAINS_LINUX_DOCKER_IMAGE (default: centos:7)
+      PROXYCHAINS_LINUX_DOCKER_IMAGE (default: centos:7 for amd64; rockylinux:8 for arm64)
   - Linux build mode can be overridden with:
       PROXYCHAINS_LINUX_BUILD_MODE=auto|docker|native (default: auto)
   - Writes only to ./third_party/proxychains and ./.build/proxychains.
@@ -177,6 +178,14 @@ if [[ -z "$target_arch" ]]; then
 fi
 validate_target_os "$target_os"
 validate_target_arch "$target_arch"
+
+if [[ "$target_os" == "linux" && -z "$LINUX_DOCKER_IMAGE" ]]; then
+  if [[ "$target_arch" == "arm64" ]]; then
+    LINUX_DOCKER_IMAGE="rockylinux:8"
+  else
+    LINUX_DOCKER_IMAGE="centos:7"
+  fi
+fi
 
 mkdir -p "$THIRD_PARTY_DIR" "$BUILD_DIR"
 

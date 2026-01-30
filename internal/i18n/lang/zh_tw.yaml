@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "按 q 退出"
+  help: "幫助"
+
+tabs:
+  nodes: "節點"
+  subscription: "訂閱"
+  settings: "設定"
+  logs: "日誌"
+
+nodes:
+  name: "名稱"
+  type: "類型"
+  latency: "延遲"
+  speed: "速度"
+  status: "狀態"
+  no_nodes: "暫無節點，請先新增訂閱"
+  testing: "測試中..."
+  select: "選擇"
+  test_all: "全部測試"
+  connected: "已連線"
+  timeout: "逾時"
+  unknown: "未知"
+
+subscription:
+  name: "名稱"
+  url: "連結"
+  node_count: "節點數"
+  last_update: "更新時間"
+  add: "新增"
+  delete: "刪除"
+  update: "更新"
+  update_all: "全部更新"
+  no_subs: "暫無訂閱，按 'a' 新增連結訂閱，或按 'z' 貼上內容"
+  updating: "更新中..."
+  input_url: "請輸入訂閱連結："
+  input_name: "請輸入訂閱名稱："
+  input_content: "請貼上訂閱內容："
+
+settings:
+  socks_port: "SOCKS5 埠"
+  http_port: "HTTP 埠"
+  allow_lan: "允許區域網路連線"
+  language: "語言"
+  concurrent: "並發測試數"
+  timeout: "測試逾時"
+  server_display: "伺服器位址:埠"
+  restart_core: "重新啟動內核"
+  on: "開"
+  off: "關"
+  save: "儲存"
+  saved: "設定已儲存！"
+
+logs:
+  clear: "清空"
+  no_logs: "暫無日誌"
+  level: "等級"
+  time: "時間"
+  message: "訊息"
+
+status:
+  disconnected: "斷開"
+  connecting: "連線中..."
+  connected: "已連線"
+  connected_rule: "已連線（規則）"
+  connected_global: "已連線（全域）"
+  error: "錯誤"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter 確認"
+  cancel: "Esc取消"
+  back: "返回"
+  enter: "Enter 選擇"
+  tab: "Tab 切換"
+  arrows: "↑↓ 導航"
+
+errors:
+  load_config: "載入設定失敗"
+  save_config: "儲存設定失敗"
+  fetch_sub: "取得訂閱失敗"
+  parse_sub: "解析訂閱失敗"
+  start_proxy: "啟動代理失敗"
+  stop_proxy: "停止代理失敗"
+  invalid_port: "無效埠號"
+  no_node_selected: "未選擇節點：請先進入「%s」頁選中一個節點並按 Enter"

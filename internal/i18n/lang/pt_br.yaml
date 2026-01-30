@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Pressione q para sair"
+  help: "Ajuda"
+
+tabs:
+  nodes: "Nós"
+  subscription: "Assinaturas"
+  settings: "Configurações"
+  logs: "Logs"
+
+nodes:
+  name: "Nome"
+  type: "Tipo"
+  latency: "Latência"
+  speed: "Velocidade"
+  status: "Status"
+  no_nodes: "Nenhum nó disponível. Adicione uma assinatura primeiro."
+  testing: "Testando..."
+  select: "Selecionar"
+  test_all: "Testar todos"
+  connected: "Conectado"
+  timeout: "Tempo esgotado"
+  unknown: "Desconhecido"
+
+subscription:
+  name: "Nome"
+  url: "URL"
+  node_count: "Nós"
+  last_update: "Última atualização"
+  add: "Adicionar"
+  delete: "Excluir"
+  update: "Atualizar"
+  update_all: "Atualizar tudo"
+  no_subs: "Nenhuma assinatura. Pressione 'a' para adicionar URL ou 'z' para colar."
+  updating: "Atualizando..."
+  input_url: "Digite a URL da assinatura:"
+  input_name: "Digite o nome da assinatura:"
+  input_content: "Cole o conteúdo da assinatura:"
+
+settings:
+  socks_port: "Porta SOCKS5"
+  http_port: "Porta HTTP"
+  allow_lan: "Permitir conexões LAN"
+  language: "Idioma"
+  concurrent: "Testes simultâneos"
+  timeout: "Tempo limite do teste"
+  server_display: "Coluna Server (Host:Port)"
+  restart_core: "Reiniciar núcleo"
+  on: "Ligado"
+  off: "Desligado"
+  save: "Salvar"
+  saved: "Configurações salvas!"
+
+logs:
+  clear: "Limpar"
+  no_logs: "Sem logs ainda."
+  level: "Nível"
+  time: "Hora"
+  message: "Mensagem"
+
+status:
+  disconnected: "Desconectado"
+  connecting: "Conectando..."
+  connected: "Conectado"
+  connected_rule: "Conectado (Regras)"
+  connected_global: "Conectado (Global)"
+  error: "Erro"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Voltar"
+  enter: "Enter para selecionar"
+  tab: "Tab para alternar"
+  arrows: "↑↓ para navegar"
+
+errors:
+  load_config: "Falha ao carregar a configuração"
+  save_config: "Falha ao salvar a configuração"
+  fetch_sub: "Falha ao obter a assinatura"
+  parse_sub: "Falha ao analisar a assinatura"
+  start_proxy: "Falha ao iniciar o proxy"
+  stop_proxy: "Falha ao parar o proxy"
+  invalid_port: "Número de porta inválido"
+  no_node_selected: "Nenhum nó selecionado. Vá para a aba \"%s\" e pressione Enter."

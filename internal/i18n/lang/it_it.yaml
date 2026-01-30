@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Premi q per uscire"
+  help: "Aiuto"
+
+tabs:
+  nodes: "Nodi"
+  subscription: "Sottoscrizioni"
+  settings: "Impostazioni"
+  logs: "Log"
+
+nodes:
+  name: "Nome"
+  type: "Tipo"
+  latency: "Latenza"
+  speed: "Velocità"
+  status: "Stato"
+  no_nodes: "Nessun nodo disponibile. Aggiungi prima una sottoscrizione."
+  testing: "Test in corso..."
+  select: "Seleziona"
+  test_all: "Testa tutti"
+  connected: "Connesso"
+  timeout: "Timeout"
+  unknown: "Sconosciuto"
+
+subscription:
+  name: "Nome"
+  url: "URL"
+  node_count: "Nodi"
+  last_update: "Ultimo aggiornamento"
+  add: "Aggiungi"
+  delete: "Elimina"
+  update: "Aggiorna"
+  update_all: "Aggiorna tutto"
+  no_subs: "Nessuna sottoscrizione. Premi 'a' per aggiungere l'URL o 'z' per incollare."
+  updating: "Aggiornamento..."
+  input_url: "Inserisci l'URL della sottoscrizione:"
+  input_name: "Inserisci il nome della sottoscrizione:"
+  input_content: "Incolla il contenuto della sottoscrizione:"
+
+settings:
+  socks_port: "Porta SOCKS5"
+  http_port: "Porta HTTP"
+  allow_lan: "Consenti connessioni LAN"
+  language: "Lingua"
+  concurrent: "Test simultanei"
+  timeout: "Timeout test"
+  server_display: "Colonna Server (Host:Port)"
+  restart_core: "Riavvia core"
+  on: "Attivo"
+  off: "Disattivo"
+  save: "Salva"
+  saved: "Impostazioni salvate!"
+
+logs:
+  clear: "Pulisci"
+  no_logs: "Nessun log."
+  level: "Livello"
+  time: "Ora"
+  message: "Messaggio"
+
+status:
+  disconnected: "Disconnesso"
+  connecting: "Connessione..."
+  connected: "Connesso"
+  connected_rule: "Connesso (Regole)"
+  connected_global: "Connesso (Globale)"
+  error: "Errore"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Indietro"
+  enter: "Enter per selezionare"
+  tab: "Tab per cambiare"
+  arrows: "↑↓ per navigare"
+
+errors:
+  load_config: "Impossibile caricare la configurazione"
+  save_config: "Impossibile salvare la configurazione"
+  fetch_sub: "Impossibile ottenere la sottoscrizione"
+  parse_sub: "Impossibile analizzare la sottoscrizione"
+  start_proxy: "Impossibile avviare il proxy"
+  stop_proxy: "Impossibile fermare il proxy"
+  invalid_port: "Numero di porta non valido"
+  no_node_selected: "Nessun nodo selezionato. Vai alla scheda \"%s\" e premi Enter."

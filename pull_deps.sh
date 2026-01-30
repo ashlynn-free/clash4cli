@@ -4,7 +4,7 @@ set -euo pipefail
 # Fetch all runtime dependencies (mihomo + proxychains-ng) for supported platforms.
 #
 # Supported platforms:
-#   darwin/amd64, darwin/arm64, linux/amd64
+#   darwin/amd64, darwin/arm64, linux/amd64, linux/arm64
 #
 # This script only writes into:
 #   ./third_party/{mihomo,proxychains} and ./.build/proxychains
@@ -40,7 +40,7 @@ Notes:
   - Versions are pinned in Makefile:
       MIHOMO_VERSION, PROXYCHAINS_NG_VERSION
   - Requires network access.
-  - Building proxychains linux/amd64 on macOS requires Docker.
+  - Building proxychains linux/amd64 and linux/arm64 on macOS requires Docker.
 EOF
 }
 
@@ -99,6 +99,7 @@ platforms=(
   "darwin amd64"
   "darwin arm64"
   "linux amd64"
+  "linux arm64"
 )
 
 echo "=== clash4cli deps ==="

@@ -42,10 +42,14 @@ subscription:
 settings:
   socks_port: "SOCKS5 Port"
   http_port: "HTTP Port"
+  allow_lan: "Allow LAN connections"
   language: "Language"
   concurrent: "Concurrent Tests"
   timeout: "Test Timeout"
   server_display: "Server column (Host:Port)"
+  restart_core: "Restart core"
+  on: "On"
+  off: "Off"
   save: "Save"
   saved: "Settings saved!"
 

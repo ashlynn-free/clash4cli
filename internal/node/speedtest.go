@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 )
 
@@ -125,8 +126,19 @@ type MihomoDelayResponse struct {
 // testLatencyViaMihomoAPI tests latency using mihomo's RESTful API
 // This calls mihomo's /proxies/:name/delay endpoint which tests the specific node
 func (st *SpeedTester) testLatencyViaMihomoAPI(ctx context.Context, node *subscription.Node) (int64, error) {
-	// mihomo external controller default address
-	apiBase := "http://127.0.0.1:9090"
+	// Prefer the running clash4cli core endpoint (dynamic + secret-protected).
+	apiHost := "127.0.0.1"
+	apiPort := 9090
+	apiSecret := ""
+
+	if lock, err := proxy.ReadLockFile(); err == nil && lock != nil && lock.APIPort > 0 {
+		if lock.APIHost != "" {
+			apiHost = lock.APIHost
+		}
+		apiPort = lock.APIPort
+		apiSecret = lock.Secret
+	}
+	apiBase := fmt.Sprintf("http://%s:%d", apiHost, apiPort)
 
 	// URL encode the node name for the API call
 	encodedName := url.PathEscape(node.Name)
@@ -144,6 +156,9 @@ func (st *SpeedTester) testLatencyViaMihomoAPI(ctx context.Context, node *subscr
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return -1, err
+	}
+	if apiSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+apiSecret)
 	}
 
 	client := &http.Client{Timeout: st.timeout + time.Second}

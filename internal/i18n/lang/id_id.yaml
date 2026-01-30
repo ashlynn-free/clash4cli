@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Tekan q untuk keluar"
+  help: "Bantuan"
+
+tabs:
+  nodes: "Node"
+  subscription: "Langganan"
+  settings: "Pengaturan"
+  logs: "Log"
+
+nodes:
+  name: "Nama"
+  type: "Tipe"
+  latency: "Latensi"
+  speed: "Kecepatan"
+  status: "Status"
+  no_nodes: "Tidak ada node tersedia. Tambahkan langganan terlebih dahulu."
+  testing: "Menguji..."
+  select: "Pilih"
+  test_all: "Uji semua"
+  connected: "Terhubung"
+  timeout: "Timeout"
+  unknown: "Tidak diketahui"
+
+subscription:
+  name: "Nama"
+  url: "URL"
+  node_count: "Node"
+  last_update: "Pembaruan terakhir"
+  add: "Tambah"
+  delete: "Hapus"
+  update: "Perbarui"
+  update_all: "Perbarui semua"
+  no_subs: "Tidak ada langganan. Tekan 'a' untuk menambah URL atau 'z' untuk menempel."
+  updating: "Memperbarui..."
+  input_url: "Masukkan URL langganan:"
+  input_name: "Masukkan nama langganan:"
+  input_content: "Tempel konten langganan:"
+
+settings:
+  socks_port: "Port SOCKS5"
+  http_port: "Port HTTP"
+  allow_lan: "Izinkan koneksi LAN"
+  language: "Bahasa"
+  concurrent: "Uji simultan"
+  timeout: "Batas waktu uji"
+  server_display: "Kolom Server (Host:Port)"
+  restart_core: "Restart core"
+  on: "Aktif"
+  off: "Nonaktif"
+  save: "Simpan"
+  saved: "Pengaturan disimpan!"
+
+logs:
+  clear: "Bersihkan"
+  no_logs: "Belum ada log."
+  level: "Level"
+  time: "Waktu"
+  message: "Pesan"
+
+status:
+  disconnected: "Terputus"
+  connecting: "Menghubungkan..."
+  connected: "Terhubung"
+  connected_rule: "Terhubung (Aturan)"
+  connected_global: "Terhubung (Global)"
+  error: "Error"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Kembali"
+  enter: "Enter untuk memilih"
+  tab: "Tab untuk berpindah"
+  arrows: "↑↓ untuk navigasi"
+
+errors:
+  load_config: "Gagal memuat konfigurasi"
+  save_config: "Gagal menyimpan konfigurasi"
+  fetch_sub: "Gagal mengambil langganan"
+  parse_sub: "Gagal mem-parsing langganan"
+  start_proxy: "Gagal memulai proxy"
+  stop_proxy: "Gagal menghentikan proxy"
+  invalid_port: "Nomor port tidak valid"
+  no_node_selected: "Tidak ada node yang dipilih. Buka tab \"%s\" dan tekan Enter."

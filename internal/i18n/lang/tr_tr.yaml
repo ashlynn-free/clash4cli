@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "Çıkmak için q'ya basın"
+  help: "Yardım"
+
+tabs:
+  nodes: "Düğümler"
+  subscription: "Abonelikler"
+  settings: "Ayarlar"
+  logs: "Kayıtlar"
+
+nodes:
+  name: "Ad"
+  type: "Tür"
+  latency: "Gecikme"
+  speed: "Hız"
+  status: "Durum"
+  no_nodes: "Kullanılabilir düğüm yok. Önce bir abonelik ekleyin."
+  testing: "Test ediliyor..."
+  select: "Seç"
+  test_all: "Tümünü test et"
+  connected: "Bağlı"
+  timeout: "Zaman aşımı"
+  unknown: "Bilinmiyor"
+
+subscription:
+  name: "Ad"
+  url: "URL"
+  node_count: "Düğümler"
+  last_update: "Son güncelleme"
+  add: "Ekle"
+  delete: "Sil"
+  update: "Güncelle"
+  update_all: "Tümünü güncelle"
+  no_subs: "Abonelik yok. URL eklemek için 'a', yapıştırmak için 'z' basın."
+  updating: "Güncelleniyor..."
+  input_url: "Abonelik URL'sini girin:"
+  input_name: "Abonelik adını girin:"
+  input_content: "Abonelik içeriğini yapıştırın:"
+
+settings:
+  socks_port: "SOCKS5 Portu"
+  http_port: "HTTP Portu"
+  allow_lan: "LAN bağlantılarına izin ver"
+  language: "Dil"
+  concurrent: "Eşzamanlı testler"
+  timeout: "Test zaman aşımı"
+  server_display: "Server sütunu (Host:Port)"
+  restart_core: "Çekirdeği yeniden başlat"
+  on: "Açık"
+  off: "Kapalı"
+  save: "Kaydet"
+  saved: "Ayarlar kaydedildi!"
+
+logs:
+  clear: "Temizle"
+  no_logs: "Henüz kayıt yok."
+  level: "Seviye"
+  time: "Zaman"
+  message: "Mesaj"
+
+status:
+  disconnected: "Bağlı değil"
+  connecting: "Bağlanıyor..."
+  connected: "Bağlı"
+  connected_rule: "Bağlı (Kural)"
+  connected_global: "Bağlı (Global)"
+  error: "Hata"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "Geri"
+  enter: "Enter ile seç"
+  tab: "Tab ile değiştir"
+  arrows: "↑↓ ile gezin"
+
+errors:
+  load_config: "Yapılandırma yüklenemedi"
+  save_config: "Yapılandırma kaydedilemedi"
+  fetch_sub: "Abonelik alınamadı"
+  parse_sub: "Abonelik ayrıştırılamadı"
+  start_proxy: "Proxy başlatılamadı"
+  stop_proxy: "Proxy durdurulamadı"
+  invalid_port: "Geçersiz port numarası"
+  no_node_selected: "Düğüm seçilmedi. \"%s\" sekmesine gidin ve Enter'a basın."

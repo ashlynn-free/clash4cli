@@ -1,0 +1,88 @@
+app:
+  title: "clash4cli"
+  version: "v0.1.0"
+  quit: "q を押して終了"
+  help: "ヘルプ"
+
+tabs:
+  nodes: "ノード"
+  subscription: "サブスクリプション"
+  settings: "設定"
+  logs: "ログ"
+
+nodes:
+  name: "名前"
+  type: "種類"
+  latency: "遅延"
+  speed: "速度"
+  status: "状態"
+  no_nodes: "ノードがありません。まずサブスクリプションを追加してください。"
+  testing: "テスト中..."
+  select: "選択"
+  test_all: "全てテスト"
+  connected: "接続済み"
+  timeout: "タイムアウト"
+  unknown: "不明"
+
+subscription:
+  name: "名前"
+  url: "URL"
+  node_count: "ノード数"
+  last_update: "最終更新"
+  add: "追加"
+  delete: "削除"
+  update: "更新"
+  update_all: "すべて更新"
+  no_subs: "サブスクリプションがありません。'a' で URL 追加、'z' で貼り付け。"
+  updating: "更新中..."
+  input_url: "サブスクリプション URL を入力:"
+  input_name: "サブスクリプション名を入力:"
+  input_content: "サブスクリプション内容を貼り付け:"
+
+settings:
+  socks_port: "SOCKS5 ポート"
+  http_port: "HTTP ポート"
+  allow_lan: "LAN 接続を許可"
+  language: "言語"
+  concurrent: "同時テスト数"
+  timeout: "テストタイムアウト"
+  server_display: "Server 列 (Host:Port)"
+  restart_core: "コアを再起動"
+  on: "オン"
+  off: "オフ"
+  save: "保存"
+  saved: "設定を保存しました！"
+
+logs:
+  clear: "クリア"
+  no_logs: "ログはまだありません。"
+  level: "レベル"
+  time: "時間"
+  message: "メッセージ"
+
+status:
+  disconnected: "切断"
+  connecting: "接続中..."
+  connected: "接続済み"
+  connected_rule: "接続済み（ルール）"
+  connected_global: "接続済み（グローバル）"
+  error: "エラー"
+  proxy_info: "SOCKS5: %d | HTTP: %d"
+
+actions:
+  confirm: "Enter"
+  cancel: "Esc"
+  back: "戻る"
+  enter: "Enter で選択"
+  tab: "Tab で切替"
+  arrows: "↑↓ で移動"
+
+errors:
+  load_config: "設定の読み込みに失敗しました"
+  save_config: "設定の保存に失敗しました"
+  fetch_sub: "サブスクリプションの取得に失敗しました"
+  parse_sub: "サブスクリプションの解析に失敗しました"
+  start_proxy: "プロキシの起動に失敗しました"
+  stop_proxy: "プロキシの停止に失敗しました"
+  invalid_port: "無効なポート番号"
+  no_node_selected: "ノードが選択されていません。「%s」タブで Enter を押してください。"

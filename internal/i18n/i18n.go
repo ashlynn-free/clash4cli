@@ -72,10 +72,14 @@ type SubscriptionMessages struct {
 type SettingsMessages struct {
 	SocksPort     string `yaml:"socks_port"`
 	HTTPPort      string `yaml:"http_port"`
+	AllowLan      string `yaml:"allow_lan"`
 	Language      string `yaml:"language"`
 	Concurrent    string `yaml:"concurrent"`
 	Timeout       string `yaml:"timeout"`
 	ServerDisplay string `yaml:"server_display"`
+	RestartCore   string `yaml:"restart_core"`
+	On            string `yaml:"on"`
+	Off           string `yaml:"off"`
 	Save          string `yaml:"save"`
 	Saved         string `yaml:"saved"`
 }

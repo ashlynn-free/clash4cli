@@ -30,7 +30,7 @@ func main() {
 	}
 
 	// Create application
-	application, err := app.New()
+	application, err := app.New(Version)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -72,7 +72,7 @@ Keyboard shortcuts (in TUI):
   a                   Add subscription (in Subscriptions tab)
   d                   Delete subscription (in Subscriptions tab)
   u                   Update subscription (in Subscriptions tab)
-  q/Ctrl+C            Quit
+  q/Ctrl+C            Quit (proxy keeps running)
 
 Data directory: ~/.clash4cli/
 `)

@@ -19,11 +19,21 @@ MIHOMO_VERSION ?= 1.19.19
 CGO_ENABLED ?= 0
 .DEFAULT_GOAL := build
 
+# Packaging: avoid embedding local username/group in archives (privacy + reproducibility).
+TAR ?= tar
+TAR_IS_BSD := $(shell $(TAR) --version 2>/dev/null | head -n 1 | grep -qi bsdtar && echo 1 || echo 0)
+ifeq ($(TAR_IS_BSD),1)
+TAR_OWNER_FLAGS := --uid 0 --gid 0 --numeric-owner
+else
+TAR_OWNER_FLAGS := --owner=0 --group=0 --numeric-owner
+endif
+
 # Build targets: os/arch
 TARGETS := \
 	darwin/amd64 \
 	darwin/arm64 \
-	linux/amd64
+	linux/amd64 \
+	linux/arm64
 
 .PHONY: all build clean package packages deps proxychains proxychains_all mihomo mihomo_all release $(TARGETS)
 
@@ -48,6 +58,7 @@ proxychains_all:
 	@./scripts/fetch_proxychains.sh --os darwin --arch amd64 --version $(PROXYCHAINS_NG_VERSION)
 	@./scripts/fetch_proxychains.sh --os darwin --arch arm64 --version $(PROXYCHAINS_NG_VERSION)
 	@./scripts/fetch_proxychains.sh --os linux --arch amd64 --version $(PROXYCHAINS_NG_VERSION)
+	@./scripts/fetch_proxychains.sh --os linux --arch arm64 --version $(PROXYCHAINS_NG_VERSION)
 
 mihomo:
 	@./scripts/fetch_mihomo.sh --version $(MIHOMO_VERSION)
@@ -56,6 +67,7 @@ mihomo_all:
 	@./scripts/fetch_mihomo.sh --os darwin --arch amd64 --version $(MIHOMO_VERSION)
 	@./scripts/fetch_mihomo.sh --os darwin --arch arm64 --version $(MIHOMO_VERSION)
 	@./scripts/fetch_mihomo.sh --os linux --arch amd64 --version $(MIHOMO_VERSION)
+	@./scripts/fetch_mihomo.sh --os linux --arch arm64 --version $(MIHOMO_VERSION)
 
 deps:
 	@bash ./pull_deps.sh
@@ -81,6 +93,9 @@ darwin/arm64:
 
 linux/amd64:
 	@$(MAKE) build-target GOOS=linux GOARCH=amd64
+
+linux/arm64:
+	@$(MAKE) build-target GOOS=linux GOARCH=arm64
 
 # Generic build target
 build-target:
@@ -124,7 +139,7 @@ build-target:
 	@cp -f VERSION $(OUTPUT_DIR)/ 2>/dev/null || true
 
 	@# Create archive
-	tar -czf $(DIST_DIR)/$(ARCHIVE_NAME).tar.gz -C $(DIST_DIR) $(notdir $(OUTPUT_DIR))
+	$(TAR) $(TAR_OWNER_FLAGS) -czf $(DIST_DIR)/$(ARCHIVE_NAME).tar.gz -C $(DIST_DIR) $(notdir $(OUTPUT_DIR))
 	@echo "  Created $(ARCHIVE_NAME).tar.gz"
 
 clean:
@@ -173,9 +188,9 @@ help:
 	@echo "  make packages     Alias of 'make all'"
 	@echo "  make deps         Fetch all deps (mihomo + proxychains) for supported platforms"
 	@echo "  make proxychains  Fetch/build proxychains-ng (current platform)"
-	@echo "  make proxychains_all Fetch/build proxychains-ng (darwin amd64/arm64 + linux amd64)"
+	@echo "  make proxychains_all Fetch/build proxychains-ng (darwin amd64/arm64 + linux amd64/arm64)"
 	@echo "  make mihomo       Fetch mihomo (current platform)"
-	@echo "  make mihomo_all   Fetch mihomo (darwin amd64/arm64 + linux amd64)"
+	@echo "  make mihomo_all   Fetch mihomo (darwin amd64/arm64 + linux amd64/arm64)"
 	@echo "  make release      Alias of 'make all' (kept for compatibility)"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make install      Install to /usr/local/bin"
@@ -188,6 +203,7 @@ help:
 	@echo "  make darwin/amd64   macOS Intel"
 	@echo "  make darwin/arm64   macOS Apple Silicon"
 	@echo "  make linux/amd64    Linux x86_64"
+	@echo "  make linux/arm64    Linux aarch64"
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  VERSION           Override version string (default: git tag)"

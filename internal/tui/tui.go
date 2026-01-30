@@ -69,6 +69,8 @@ type hideOverlayMsg struct {
 	id int
 }
 
+type splashDoneMsg struct{}
+
 // Model represents the main TUI model
 type Model struct {
 	// Managers
@@ -83,6 +85,8 @@ type Model struct {
 	height            int
 	ready             bool
 	quitting          bool
+	version           string
+	showSplash        bool
 	activeSubID       string
 	selectedNode      *subscription.Node
 	connectedNodeName string
@@ -101,7 +105,7 @@ type Model struct {
 }
 
 // New creates a new TUI model
-func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, proxyCtrl *proxy.Controller) *Model {
+func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, proxyCtrl *proxy.Controller, version string) *Model {
 	m := &Model{
 		cfg:         cfg,
 		subManager:  subMgr,
@@ -113,13 +117,159 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		subsTab:     tabs.NewSubscriptionsTab(subMgr),
 		settingsTab: tabs.NewSettingsTab(cfg),
 		logsTab:     tabs.NewLogsTab(),
+		version:     strings.TrimSpace(version),
 	}
 
 	if m.nodesTab != nil {
 		m.nodesTab.SetServerDisplay(cfg.UI.ServerDisplay)
 	}
 
+	if cfg != nil && cfg.UI.ActiveSubscriptionID != "" {
+		m.activeSubID = cfg.UI.ActiveSubscriptionID
+		if m.nodesTab != nil {
+			m.nodesTab.SetSubscriptionID(m.activeSubID)
+		}
+		if m.subsTab != nil {
+			m.subsTab.SetActiveSubscription(m.activeSubID)
+		}
+	}
+
+	m.restoreStateFromProxyLock()
+
 	return m
+}
+
+func (m *Model) persistActiveSubscription(id string) tea.Cmd {
+	if m == nil || m.cfg == nil {
+		return nil
+	}
+	if m.cfg.UI.ActiveSubscriptionID == id {
+		return nil
+	}
+	m.cfg.UI.ActiveSubscriptionID = id
+	return func() tea.Msg {
+		if err := m.cfg.Save(); err != nil {
+			logger.Warn("failed to save config: %v", err)
+		}
+		return nil
+	}
+}
+
+func (m *Model) restoreStateFromProxyLock() {
+	if m == nil || m.proxyCtrl == nil || m.subManager == nil || m.nodeMgr == nil {
+		return
+	}
+	if m.proxyCtrl.GetStatus() != proxy.StatusRunning {
+		return
+	}
+
+	lock, err := proxy.ReadLockFile()
+	if err != nil || lock == nil {
+		return
+	}
+
+	subID, node := inferSubscriptionAndNode(m.subManager, lock)
+	if subID != "" {
+		m.activeSubID = subID
+		if m.nodesTab != nil {
+			m.nodesTab.SetSubscriptionID(subID)
+		}
+		if m.subsTab != nil {
+			m.subsTab.SetActiveSubscription(subID)
+		}
+	}
+
+	if node == nil && lock.Node != "" {
+		// Best-effort: show the current node in UI even if we cannot find it in subscriptions.
+		node = &subscription.Node{
+			Name:   lock.Node,
+			Type:   lock.NodeType,
+			Server: lock.NodeServer,
+			Port:   lock.NodePort,
+		}
+	}
+
+	if node != nil {
+		m.selectedNode = node
+		m.nodeMgr.Select(node)
+		m.statusBar.SetSelectedNode(node)
+	}
+
+	if lock.Node != "" {
+		m.connectedNodeName = lock.Node
+		m.proxyMode = ProxyModeRule
+		if m.nodesTab != nil {
+			m.nodesTab.SetConnectionIndicator(lock.Node, proxyModeIcon(m.proxyMode))
+		}
+	}
+
+	// Backfill lock metadata for future restarts (best-effort).
+	if lock.SubID == "" && subID != "" {
+		m.proxyCtrl.UpdateLockState(subID, node)
+	}
+}
+
+func inferSubscriptionAndNode(subMgr *subscription.Manager, lock *proxy.LockFile) (string, *subscription.Node) {
+	if subMgr == nil || lock == nil {
+		return "", nil
+	}
+
+	// 1) Trust explicit sub_id if it exists and is present on disk.
+	if lock.SubID != "" {
+		if sub, ok := subMgr.Get(lock.SubID); ok && sub != nil {
+			if n := findNodeInSubscription(sub, lock); n != nil {
+				return lock.SubID, n
+			}
+			// Even if node match fails, returning the subscription still helps the UI.
+			return lock.SubID, nil
+		}
+	}
+
+	// 2) Infer by node match across subscriptions.
+	subs := subMgr.List()
+	var matchedSubID string
+	var matchedNode *subscription.Node
+	for _, sub := range subs {
+		if sub == nil {
+			continue
+		}
+		n := findNodeInSubscription(sub, lock)
+		if n == nil {
+			continue
+		}
+		if matchedNode != nil {
+			// Ambiguous across multiple subscriptions: keep the first match.
+			continue
+		}
+		matchedSubID = sub.ID
+		matchedNode = n
+	}
+	return matchedSubID, matchedNode
+}
+
+func findNodeInSubscription(sub *subscription.Subscription, lock *proxy.LockFile) *subscription.Node {
+	if sub == nil || lock == nil {
+		return nil
+	}
+	for i := range sub.Nodes {
+		n := &sub.Nodes[i]
+
+		// Strong match (server:port) if present.
+		if lock.NodeServer != "" && lock.NodePort > 0 {
+			if n.Server == lock.NodeServer && n.Port == lock.NodePort {
+				nodeCopy := *n
+				return &nodeCopy
+			}
+			continue
+		}
+
+		// Fallback match by name.
+		if lock.Node != "" && n.Name == lock.Node {
+			nodeCopy := *n
+			return &nodeCopy
+		}
+	}
+	return nil
 }
 
 // Init initializes the model
@@ -140,12 +290,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		first := !m.ready
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
 		m.updateSizes()
+		if first {
+			m.showSplash = true
+			cmds = append(cmds, tea.Tick(1*time.Second, func(time.Time) tea.Msg {
+				return splashDoneMsg{}
+			}))
+		}
 
 	case tea.KeyMsg:
+		if m.showSplash {
+			// Allow quitting during splash, ignore other keys.
+			if key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))) {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
 		// If a center prompt is visible, hide it on any keypress.
 		if m.overlayText != "" {
 			m.overlayText = ""
@@ -155,9 +321,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
 			m.quitting = true
-			if m.proxyCtrl != nil {
-				_ = m.proxyCtrl.Stop()
-			}
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
@@ -192,7 +355,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If the user chose a different node, keep the current mode and just switch node.
 				// Only cycle mode when pressing Enter again on the same node.
 				if focused != nil && !sameAsPrev {
-					return m, m.switchNode(focused.Name)
+					return m, m.switchNode(focused)
 				}
 				return m, m.cycleProxyMode()
 			}
@@ -214,13 +377,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.overlayText = ""
 		}
 
+	case splashDoneMsg:
+		m.showSplash = false
+
 	case tabs.NodeSelectedMsg:
 		m.selectedNode = msg.Node
 		m.statusBar.SetSelectedNode(msg.Node)
 		m.logsTab.AddLog("info", fmt.Sprintf("Selected node: %s", msg.Node.Name))
 		// If proxy is running, just switch node via API; otherwise start it
 		if m.proxyCtrl.GetStatus() == proxy.StatusRunning {
-			cmds = append(cmds, m.switchNode(msg.Node.Name))
+			cmds = append(cmds, m.switchNode(msg.Node))
 		} else {
 			cmds = append(cmds, m.startProxy())
 		}
@@ -249,6 +415,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.activeSubID = msg.ID
+		cmds = append(cmds, m.persistActiveSubscription(m.activeSubID))
 		if m.subsTab != nil {
 			m.subsTab.SetActiveSubscription(m.activeSubID)
 		}
@@ -281,14 +448,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if newActive != prevActive {
+		if newActive != prevActive && prevActive != "" {
 			// If the active subscription changes (including deletion), disconnect old nodes/proxy.
+			// NOTE: On startup, prevActive may be empty while a background proxy core is running;
+			// we should not kill it just because we picked a default subscription.
 			m.disconnectProxy()
 			m.selectedNode = nil
 			m.nodeMgr.Select(nil)
 			m.statusBar.SetSelectedNode(nil)
 		}
 		m.activeSubID = newActive
+		cmds = append(cmds, m.persistActiveSubscription(m.activeSubID))
 
 		if m.nodesTab != nil {
 			m.nodesTab.SetSubscriptionID(m.activeSubID)
@@ -306,6 +476,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.nodesTab != nil {
 			m.nodesTab.SetServerDisplay(m.cfg.UI.ServerDisplay)
 		}
+
+	case tabs.RestartCoreMsg:
+		cmds = append(cmds, m.restartProxyCore())
 
 	case proxy.LogEntry:
 		// Forward to logs tab
@@ -376,6 +549,17 @@ func (m *Model) View() string {
 		return "Initializing..."
 	}
 
+	if m.showSplash {
+		title := "Clash 4 Cli"
+		if m.version != "" && m.version != "dev" {
+			title = fmt.Sprintf("%s v%s", title, m.version)
+		} else if m.version != "" {
+			title = fmt.Sprintf("%s %s", title, m.version)
+		}
+		box := styles.InfoBox.Render(styles.Title.Render(title))
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	}
+
 	// Build layout
 	var content strings.Builder
 
@@ -410,7 +594,11 @@ func (m *Model) View() string {
 	// Status bar
 	m.statusBar.SetWidth(m.width)
 	m.statusBar.SetProxyStatus(m.proxyCtrl.GetStatus())
-	m.statusBar.SetMixedPort(m.cfg.Proxy.MixedPort)
+	if m.proxyCtrl != nil {
+		m.statusBar.SetMixedPort(m.proxyCtrl.CurrentPort())
+	} else {
+		m.statusBar.SetMixedPort(m.cfg.Proxy.MixedPort)
+	}
 	m.statusBar.SetProxyMode(m.proxyMode.String())
 	content.WriteString(m.statusBar.View())
 
@@ -531,7 +719,7 @@ func (m *Model) toggleProxy() tea.Cmd {
 			}
 		}
 
-		err := m.proxyCtrl.Start(nodes, m.selectedNode)
+		err := m.proxyCtrl.Start(m.activeSubID, nodes, m.selectedNode)
 		if err != nil {
 			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
 		}
@@ -568,7 +756,7 @@ func (m *Model) cycleProxyMode() tea.Cmd {
 
 			wasRunning := m.proxyCtrl.GetStatus() == proxy.StatusRunning
 			if !wasRunning {
-				if err := m.proxyCtrl.Start(nodes, selectedNode); err != nil {
+				if err := m.proxyCtrl.Start(m.activeSubID, nodes, selectedNode); err != nil {
 					return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
 				}
 				connectedNodeName = selectedNode.Name
@@ -659,7 +847,7 @@ func (m *Model) startProxy() tea.Cmd {
 			}
 		}
 
-		err := m.proxyCtrl.Start(nodes, m.selectedNode)
+		err := m.proxyCtrl.Start(m.activeSubID, nodes, m.selectedNode)
 		if err != nil {
 			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
 		}
@@ -672,8 +860,69 @@ func (m *Model) startProxy() tea.Cmd {
 	}
 }
 
-func (m *Model) switchNode(nodeName string) tea.Cmd {
+func (m *Model) restartProxyCore() tea.Cmd {
+	desiredMode := m.proxyMode
+	if desiredMode == ProxyModeDisconnect {
+		desiredMode = ProxyModeRule
+	}
+
 	return func() tea.Msg {
+		nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
+		if len(nodes) == 0 {
+			return overlayMsg{text: i18n.M().Nodes.NoNodes}
+		}
+
+		if m.selectedNode == nil {
+			msg := i18n.M().Errors.NoNodeSelected
+			if msg == "" {
+				msg = "No node selected"
+			}
+			return overlayMsg{text: fmt.Sprintf(msg, i18n.M().Tabs.Nodes)}
+		}
+
+		// Best-effort stop, then start with the same selected node.
+		_ = m.proxyCtrl.Stop()
+		time.Sleep(500 * time.Millisecond)
+
+		if err := m.proxyCtrl.Start(m.activeSubID, nodes, m.selectedNode); err != nil {
+			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
+		}
+
+		nodeName := m.selectedNode.Name
+
+		// Restore mode if needed (Start defaults to rule).
+		if desiredMode == ProxyModeGlobal {
+			var lastErr error
+			for i := 0; i < 50; i++ {
+				if err := m.proxyCtrl.SetMode("global"); err == nil {
+					lastErr = nil
+					break
+				} else {
+					lastErr = err
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if lastErr != nil {
+				return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, err: lastErr, connectedNodeName: nodeName}
+			}
+			if err := m.proxyCtrl.SwitchGroup("GLOBAL", nodeName); err != nil {
+				return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeGlobal, err: err, connectedNodeName: nodeName}
+			}
+			return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeGlobal, connectedNodeName: nodeName}
+		}
+
+		return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, connectedNodeName: nodeName}
+	}
+}
+
+func (m *Model) switchNode(node *subscription.Node) tea.Cmd {
+	if node == nil {
+		return nil
+	}
+	nodeSnapshot := *node
+	subID := m.activeSubID
+	return func() tea.Msg {
+		nodeName := nodeSnapshot.Name
 		err := m.proxyCtrl.SwitchNode(nodeName)
 		if err != nil {
 			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
@@ -683,6 +932,7 @@ func (m *Model) switchNode(nodeName string) tea.Cmd {
 				return proxyStatusMsg{status: proxy.StatusRunning, mode: m.proxyMode, err: err}
 			}
 		}
+		m.proxyCtrl.UpdateLockState(subID, &nodeSnapshot)
 		return proxyStatusMsg{status: proxy.StatusRunning, mode: m.proxyMode, connectedNodeName: nodeName}
 	}
 }
