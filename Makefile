@@ -1,6 +1,6 @@
-# Version: use git tag if available, else VERSION file, else "dev"
-# git describe --tags only succeeds if there are actual tags
-VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || cat VERSION 2>/dev/null || echo "dev")
+# Version: prefer VERSION file, else git tag, else "dev".
+# Strip leading "v" so UI displays "vX.Y.Z" consistently.
+VERSION ?= $(shell (cat VERSION 2>/dev/null || git describe --tags --dirty 2>/dev/null || echo "dev") | sed 's/^v//')
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
@@ -36,6 +36,7 @@ TARGETS := \
 	linux/arm64
 
 .PHONY: all build clean package packages deps proxychains proxychains_all mihomo mihomo_all release linux linux_only linux_deps $(TARGETS)
+.PHONY: build_all
 .PHONY: deb deb_amd64 deb_arm64 rpm rpm_amd64 rpm_arm64 linux_pkgs
 
 # Cross-platform: build all packages
@@ -74,7 +75,7 @@ deps:
 	@bash ./pull_deps.sh
 
 # Build all platforms
-release: clean $(TARGETS)
+build_all: clean $(TARGETS)
 	@echo ""
 	@echo "=== Release builds complete ==="
 	@ls -lh $(DIST_DIR)/*.tar.gz 2>/dev/null || true
@@ -83,13 +84,17 @@ release: clean $(TARGETS)
 	@ls -d $(DIST_DIR)/clash4cli-*/ 2>/dev/null || true
 
 # Alias: build all platform tar.gz packages
-packages: release
+packages: build_all
+
+# Publish GitHub Release (builds + uploads via ./release.sh)
+release:
+	@bash ./release.sh
 
 # Build all Linux artifacts: tar.gz + deb + rpm (amd64 + arm64)
 linux_only: linux_pkgs linux/amd64 linux/arm64
 
 # Full release shortcut: all platform tar.gz + linux deb/rpm
-linux: release linux_pkgs
+linux: build_all linux_pkgs
 
 linux_deps: deps linux
 
@@ -233,7 +238,8 @@ help:
 	@echo "  make deb          Build linux .deb (amd64 + arm64) via nfpm"
 	@echo "  make rpm          Build linux .rpm (amd64 + arm64) via nfpm"
 	@echo "  make linux_pkgs   Build linux .deb + .rpm (amd64 + arm64)"
-	@echo "  make release      Alias of 'make all' (kept for compatibility)"
+	@echo "  make release      Build+upload GitHub Release (requires GITHUB_TOKEN)"
+	@echo "  make build_all    Build tar.gz for all platforms"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make install      Install to /usr/local/bin"
 	@echo "  make uninstall    Remove from /usr/local/bin"
