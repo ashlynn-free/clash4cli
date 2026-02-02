@@ -1,45 +1,45 @@
 [🇺🇸 English](README.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇨🇳 繁體中文](README.zh-TW.md) | [🇷🇺 Русский](README.ru-RU.md) | [🇯🇵 日本語](README.ja-JP.md) | [🇰🇷 한국어](README.ko-KR.md) | [🇪🇸 Español](README.es-ES.md) | [🇧🇷 Português (Brasil)](README.pt-BR.md) | [🇫🇷 Français](README.fr-FR.md) | [🇩🇪 Deutsch](README.de-DE.md) | [🇮🇹 Italiano](README.it-IT.md) | [🇮🇩 Bahasa Indonesia](README.id-ID.md) | [🇻🇳 Tiếng Việt](README.vi-VN.md) | [🇹🇷 Türkçe](README.tr-TR.md)
 
 # 🚀 Clash for CLI
-**Best cross-platform clash client for CLI.**
+**Der beste plattformübergreifende Clash-Client für die CLI.**
 
 ![](./images/screenshot.png)
 
-## 🤩 Primary features:
-* No setup, out of the box.
-* **Modern Subscription support**
-* Powered by [mihomo](https://github.com/MetaCubeX/mihomo) kernel
-* **Rootless**
-* Use `c4cgo` to run any command via proxy
-* Cross platform for both Linux and macOS
+## 🤩 Hauptfunktionen:
+* Keine Einrichtung, sofort einsatzbereit.
+* **Moderne Subscription-Unterstützung**
+* Angetrieben vom [mihomo](https://github.com/MetaCubeX/mihomo)-Kernel
+* **Ohne Root**
+* Mit `c4cgo` beliebige Befehle über Proxy ausführen
+* Cross-Platform für Linux und macOS
 ## 📦 Installation
-Download binaries from [GitHub Releases](https://github.com/ashlynn-free/clash4cli/releases), then just execute it.
+Lade die Binärdateien von [GitHub Releases](https://github.com/ashlynn-free/clash4cli/releases) herunter und führe sie einfach aus.
 
 
-## 🧭 Basic Usage
+## 🧭 Grundlegende Nutzung
 
-### Start the dashboard
+### Dashboard starten
 ```bash
 ./c4c
 ```
 
-In the UI, add/select a subscription and choose a node to connect.
+In der UI Subscription hinzufügen/auswählen und einen Node zum Verbinden wählen.
 
-- Default mixed port: `17890` (configurable in Settings)
-- The core runs in background by default; quitting `c4c` does **not** stop it
-- To stop: go to Nodes and press `Enter` until `Disconnect`
+- Standard Mixed-Port: `17890` (in Settings konfigurierbar)
+- Der Core läuft standardmäßig im Hintergrund; das Beenden von `c4c` stoppt ihn **nicht**
+- Zum Stoppen: gehe zu Nodes und drücke `Enter`, bis `Disconnect` erscheint
 
 ### `c4cgo`
 
-`c4cgo` automatically uses the proxy environment created by c4c. This feat is based on [proxychians-ng](https://github.com/rofl0r/proxychains-ng)
+`c4cgo` nutzt automatisch die von c4c erstellte Proxy-Umgebung. Dieses Feature basiert auf [proxychians-ng](https://github.com/rofl0r/proxychains-ng)
 
-Example: run `curl` via proxy
+Beispiel: `curl` über Proxy ausführen
 
 ```bash
 ./c4cgo curl ipinfo.io
 ```
 
-Example output:
+Beispielausgabe:
 
 ```text
 [c4cgo] Using proxy at 127.0.0.1:17890 (node: SG node)
@@ -60,6 +60,6 @@ Example output:
 }
 ```
 
-## 🗂️ Data directory
+## 🗂️ Datenverzeichnis
 
-Default: `~/.clash4cli/` (includes `config.yaml`, `proxy.lock`, `subscriptions/`, `mihomo/`, etc.).
+Standard: `~/.clash4cli/` (enthält `config.yaml`, `proxy.lock`, `subscriptions/`, `mihomo/`, usw.).

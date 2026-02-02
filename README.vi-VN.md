@@ -1,45 +1,45 @@
 [🇺🇸 English](README.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇨🇳 繁體中文](README.zh-TW.md) | [🇷🇺 Русский](README.ru-RU.md) | [🇯🇵 日本語](README.ja-JP.md) | [🇰🇷 한국어](README.ko-KR.md) | [🇪🇸 Español](README.es-ES.md) | [🇧🇷 Português (Brasil)](README.pt-BR.md) | [🇫🇷 Français](README.fr-FR.md) | [🇩🇪 Deutsch](README.de-DE.md) | [🇮🇹 Italiano](README.it-IT.md) | [🇮🇩 Bahasa Indonesia](README.id-ID.md) | [🇻🇳 Tiếng Việt](README.vi-VN.md) | [🇹🇷 Türkçe](README.tr-TR.md)
 
 # 🚀 Clash for CLI
-**Best cross-platform clash client for CLI.**
+**Trình khách Clash đa nền tảng tốt nhất cho CLI.**
 
 ![](./images/screenshot.png)
 
-## 🤩 Primary features:
-* No setup, out of the box.
-* **Modern Subscription support**
-* Powered by [mihomo](https://github.com/MetaCubeX/mihomo) kernel
-* **Rootless**
-* Use `c4cgo` to run any command via proxy
-* Cross platform for both Linux and macOS
-## 📦 Installation
-Download binaries from [GitHub Releases](https://github.com/ashlynn-free/clash4cli/releases), then just execute it.
+## 🤩 Tính năng chính:
+* Không cần thiết lập, dùng ngay.
+* **Hỗ trợ subscription hiện đại**
+* Được cung cấp bởi kernel [mihomo](https://github.com/MetaCubeX/mihomo)
+* **Không cần root**
+* Dùng `c4cgo` để chạy bất kỳ lệnh nào qua proxy
+* Đa nền tảng cho Linux và macOS
+## 📦 Cài đặt
+Tải file nhị phân từ [GitHub Releases](https://github.com/ashlynn-free/clash4cli/releases), sau đó chạy ngay.
 
 
-## 🧭 Basic Usage
+## 🧭 Cách dùng cơ bản
 
-### Start the dashboard
+### Khởi động dashboard
 ```bash
 ./c4c
 ```
 
-In the UI, add/select a subscription and choose a node to connect.
+Trong UI, thêm/chọn subscription và chọn một node để kết nối.
 
-- Default mixed port: `17890` (configurable in Settings)
-- The core runs in background by default; quitting `c4c` does **not** stop it
-- To stop: go to Nodes and press `Enter` until `Disconnect`
+- Cổng mixed mặc định: `17890` (có thể đổi trong Settings)
+- Core chạy nền; thoát `c4c` **không** dừng core
+- Để dừng: vào Nodes và bấm `Enter` cho đến `Disconnect`
 
 ### `c4cgo`
 
-`c4cgo` automatically uses the proxy environment created by c4c. This feat is based on [proxychians-ng](https://github.com/rofl0r/proxychains-ng)
+`c4cgo` tự động dùng môi trường proxy do c4c tạo ra. Tính năng này dựa trên [proxychians-ng](https://github.com/rofl0r/proxychains-ng)
 
-Example: run `curl` via proxy
+Ví dụ: chạy `curl` qua proxy
 
 ```bash
 ./c4cgo curl ipinfo.io
 ```
 
-Example output:
+Ví dụ output:
 
 ```text
 [c4cgo] Using proxy at 127.0.0.1:17890 (node: SG node)
@@ -60,6 +60,6 @@ Example output:
 }
 ```
 
-## 🗂️ Data directory
+## 🗂️ Thư mục dữ liệu
 
-Default: `~/.clash4cli/` (includes `config.yaml`, `proxy.lock`, `subscriptions/`, `mihomo/`, etc.).
+Mặc định: `~/.clash4cli/` (bao gồm `config.yaml`, `proxy.lock`, `subscriptions/`, `mihomo/`, v.v.).

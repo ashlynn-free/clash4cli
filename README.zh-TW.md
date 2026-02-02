@@ -1,45 +1,45 @@
 [🇺🇸 English](README.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇨🇳 繁體中文](README.zh-TW.md) | [🇷🇺 Русский](README.ru-RU.md) | [🇯🇵 日本語](README.ja-JP.md) | [🇰🇷 한국어](README.ko-KR.md) | [🇪🇸 Español](README.es-ES.md) | [🇧🇷 Português (Brasil)](README.pt-BR.md) | [🇫🇷 Français](README.fr-FR.md) | [🇩🇪 Deutsch](README.de-DE.md) | [🇮🇹 Italiano](README.it-IT.md) | [🇮🇩 Bahasa Indonesia](README.id-ID.md) | [🇻🇳 Tiếng Việt](README.vi-VN.md) | [🇹🇷 Türkçe](README.tr-TR.md)
 
 # 🚀 Clash for CLI
-**Best cross-platform clash client for CLI.**
+**最佳跨平台 CLI Clash 客戶端。**
 
 ![](./images/screenshot.png)
 
-## 🤩 Primary features:
-* No setup, out of the box.
-* **Modern Subscription support**
-* Powered by [mihomo](https://github.com/MetaCubeX/mihomo) kernel
-* **Rootless**
-* Use `c4cgo` to run any command via proxy
-* Cross platform for both Linux and macOS
-## 📦 Installation
-Download binaries from [GitHub Releases](https://github.com/ashlynn-free/clash4cli/releases), then just execute it.
+## 🤩 主要特色：
+* 免設定，開箱即用。
+* **現代訂閱支援**
+* 由 [mihomo](https://github.com/MetaCubeX/mihomo) 核心驅動
+* **無需 Root**
+* 使用 `c4cgo` 讓任意指令走代理
+* 同時支援 Linux 與 macOS 的跨平台運行
+## 📦 安裝
+從 [GitHub Releases](https://github.com/ashlynn-free/clash4cli/releases) 下載二進位檔，然後直接執行即可。
 
 
-## 🧭 Basic Usage
+## 🧭 基本用法
 
-### Start the dashboard
+### 啟動面板
 ```bash
 ./c4c
 ```
 
-In the UI, add/select a subscription and choose a node to connect.
+在介面裡新增/選擇訂閱並選擇一個節點進行連線。
 
-- Default mixed port: `17890` (configurable in Settings)
-- The core runs in background by default; quitting `c4c` does **not** stop it
-- To stop: go to Nodes and press `Enter` until `Disconnect`
+- 預設混合埠：`17890`（可在 Settings 修改）
+- 核心預設背景執行：離開 `c4c` 並不會停止核心
+- 停止方式：回到 Nodes 按 `Enter` 直到 `Disconnect`
 
 ### `c4cgo`
 
-`c4cgo` automatically uses the proxy environment created by c4c. This feat is based on [proxychians-ng](https://github.com/rofl0r/proxychains-ng)
+`c4cgo` 會自動使用由 c4c 建立的代理網路環境。此功能基於 [proxychians-ng](https://github.com/rofl0r/proxychains-ng)
 
-Example: run `curl` via proxy
+範例：透過代理執行 `curl`
 
 ```bash
 ./c4cgo curl ipinfo.io
 ```
 
-Example output:
+範例輸出：
 
 ```text
 [c4cgo] Using proxy at 127.0.0.1:17890 (node: SG node)
@@ -60,6 +60,6 @@ Example output:
 }
 ```
 
-## 🗂️ Data directory
+## 🗂️ 資料目錄
 
-Default: `~/.clash4cli/` (includes `config.yaml`, `proxy.lock`, `subscriptions/`, `mihomo/`, etc.).
+預設：`~/.clash4cli/`（包含 `config.yaml`、`proxy.lock`、`subscriptions/`、`mihomo/` 等）。
