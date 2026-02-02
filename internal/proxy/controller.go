@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,20 +26,24 @@ import (
 type LockFile struct {
 	Port       int    `json:"port"`
 	APIPort    int    `json:"api_port"`
+	RedirPort  int    `json:"redir_port,omitempty"`
 	PID        int    `json:"pid"`
 	SubID      string `json:"sub_id,omitempty"`
 	Node       string `json:"node,omitempty"`
 	NodeServer string `json:"node_server,omitempty"`
 	NodePort   int    `json:"node_port,omitempty"`
 	NodeType   string `json:"node_type,omitempty"`
-	ProxyHost  string `json:"proxy_host,omitempty"`
-	APIHost    string `json:"api_host,omitempty"`
-	ConfigPath string `json:"config_path,omitempty"`
-	WorkDir    string `json:"work_dir,omitempty"`
-	LogPath    string `json:"log_path,omitempty"`
-	Secret     string `json:"secret,omitempty"`
-	StartedAt  string `json:"started_at,omitempty"`
-	Detached   bool   `json:"detached,omitempty"`
+	// DockerRedirectTCP indicates that the generated mihomo config includes a redir-port
+	// suitable for iptables REDIRECT from Docker containers (TCP only).
+	DockerRedirectTCP bool   `json:"docker_redirect_tcp,omitempty"`
+	ProxyHost         string `json:"proxy_host,omitempty"`
+	APIHost           string `json:"api_host,omitempty"`
+	ConfigPath        string `json:"config_path,omitempty"`
+	WorkDir           string `json:"work_dir,omitempty"`
+	LogPath           string `json:"log_path,omitempty"`
+	Secret            string `json:"secret,omitempty"`
+	StartedAt         string `json:"started_at,omitempty"`
+	Detached          bool   `json:"detached,omitempty"`
 }
 
 // Status represents the proxy status
@@ -84,11 +87,13 @@ type Controller struct {
 	status     Status
 	mu         sync.RWMutex
 	logCh      chan LogEntry
+	apiClient  *http.Client
 	cfg        *config.Config
 	configPath string
 	pid        int
 	port       int
 	apiPort    int
+	redirPort  int
 	apiHost    string
 	proxyHost  string
 	secret     string
@@ -100,6 +105,7 @@ func NewController(cfg *config.Config) *Controller {
 	c := &Controller{
 		status:    StatusStopped,
 		logCh:     make(chan LogEntry, 100),
+		apiClient: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
 		cfg:       cfg,
 		apiHost:   "127.0.0.1",
 		proxyHost: "127.0.0.1",
@@ -176,13 +182,32 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 		return fmt.Errorf("failed to pick a free api port: %w", err)
 	}
 
+	redirPort := 0
+	dockerRedirectTCP := false
+	if c.cfg != nil && c.cfg.Proxy.DockerRedirectTCP && runtime.GOOS == "linux" {
+		dockerRedirectTCP = true
+		preferredRedirPort := 0
+		if preferredMixedPort > 0 && preferredMixedPort < 65535 {
+			preferredRedirPort = preferredMixedPort + 1
+		}
+		redirPort, err = pickTCPPort(proxyListenHost, preferredRedirPort, 200, map[int]struct{}{
+			mixedPort: {},
+			apiPort:   {},
+		})
+		if err != nil {
+			c.status = StatusError
+			return fmt.Errorf("failed to pick a free redir-port: %w", err)
+		}
+	}
+
 	c.port = mixedPort
 	c.apiPort = apiPort
+	c.redirPort = redirPort
 	c.proxyHost = proxyDialHost
 	c.secret = secret
 
 	// Generate mihomo config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, apiHost)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, apiHost, c.redirPort)
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to generate config: %v", err)
@@ -289,22 +314,24 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 		nodeType = selectedNode.Type
 	}
 	lock := LockFile{
-		Port:       c.port,
-		APIPort:    c.apiPort,
-		PID:        c.pid,
-		SubID:      subID,
-		Node:       nodeName,
-		NodeServer: nodeServer,
-		NodePort:   nodePort,
-		NodeType:   nodeType,
-		ProxyHost:  c.proxyHost,
-		APIHost:    c.apiHost,
-		ConfigPath: c.configPath,
-		WorkDir:    workDir,
-		LogPath:    c.logPath,
-		Secret:     c.secret,
-		StartedAt:  time.Now().UTC().Format(time.RFC3339),
-		Detached:   true,
+		Port:              c.port,
+		APIPort:           c.apiPort,
+		RedirPort:         c.redirPort,
+		PID:               c.pid,
+		SubID:             subID,
+		Node:              nodeName,
+		NodeServer:        nodeServer,
+		NodePort:          nodePort,
+		NodeType:          nodeType,
+		DockerRedirectTCP: dockerRedirectTCP,
+		ProxyHost:         c.proxyHost,
+		APIHost:           c.apiHost,
+		ConfigPath:        c.configPath,
+		WorkDir:           workDir,
+		LogPath:           c.logPath,
+		Secret:            c.secret,
+		StartedAt:         time.Now().UTC().Format(time.RFC3339),
+		Detached:          true,
 	}
 	if err := writeLockFile(lock); err != nil {
 		logger.Warn("Failed to create lock file: %v", err)
@@ -439,6 +466,7 @@ func (c *Controller) Stop() error {
 		c.pid = lock.PID
 		c.port = lock.Port
 		c.apiPort = lock.APIPort
+		c.redirPort = lock.RedirPort
 		if lock.APIHost != "" {
 			c.apiHost = lock.APIHost
 		}
@@ -526,6 +554,18 @@ func findMihomoBinary() (string, error) {
 		return path, nil
 	}
 
+	// Check in common packaged locations (deb/rpm/Homebrew-style layouts)
+	for _, candidate := range []string{
+		"/usr/lib/clash4cli/mihomo",
+		"/usr/lib64/clash4cli/mihomo",
+		"/usr/local/lib/clash4cli/mihomo",
+		"/opt/homebrew/lib/clash4cli/mihomo",
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
 	// Check in third_party directory relative to executable
 	execPath, err := os.Executable()
 	if err == nil {
@@ -581,7 +621,7 @@ func (c *Controller) Reload(nodes []subscription.Node, selectedNode *subscriptio
 	defer c.mu.Unlock()
 
 	// Generate new config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, c.apiHost)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, c.apiHost, c.redirPort)
 	if err != nil {
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
@@ -642,8 +682,7 @@ func (c *Controller) SwitchGroup(groupName, entryName string) error {
 		req.Header.Set("Authorization", "Bearer "+c.secret)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.doAPI(req)
 	if err != nil {
 		return fmt.Errorf("failed to call API: %w", err)
 	}
@@ -692,7 +731,6 @@ func (c *Controller) SetMode(mode string) error {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
 	var lastStatus int
 	for _, method := range []string{http.MethodPatch, http.MethodPut} {
 		// mihomo/clash external controller typically supports PATCH /configs for live updates.
@@ -706,7 +744,7 @@ func (c *Controller) SetMode(mode string) error {
 			req.Header.Set("Authorization", "Bearer "+c.secret)
 		}
 
-		resp, err := client.Do(req)
+		resp, err := c.doAPI(req)
 		if err != nil {
 			return fmt.Errorf("failed to call API: %w", err)
 		}
@@ -731,6 +769,69 @@ func (c *Controller) SetMode(mode string) error {
 	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Mode switched to: %s", mode)}
 	logger.Info("Mode switched to: %s", mode)
 	return nil
+}
+
+type connectionsResponse struct {
+	DownloadTotal int64 `json:"downloadTotal"`
+	UploadTotal   int64 `json:"uploadTotal"`
+}
+
+func (c *Controller) doAPI(req *http.Request) (*http.Response, error) {
+	client := c.apiClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	}
+	return client.Do(req)
+}
+
+// GetTrafficTotals returns the total uploaded/downloaded bytes reported by the core.
+func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64, err error) {
+	c.mu.RLock()
+	if c.status != StatusRunning {
+		c.mu.RUnlock()
+		return 0, 0, fmt.Errorf("proxy is not running")
+	}
+
+	apiHost := c.apiHost
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	apiPort := c.apiPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	secret := c.secret
+	c.mu.RUnlock()
+
+	apiURL := fmt.Sprintf("http://%s:%d/connections", apiHost, apiPort)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
+	resp, err := c.doAPI(req)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to call API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		msg := strings.TrimSpace(string(body))
+		if msg != "" {
+			return 0, 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, msg)
+		}
+		return 0, 0, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var out connectionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, 0, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return out.UploadTotal, out.DownloadTotal, nil
 }
 
 // removeLockFile removes the proxy.lock file
@@ -820,6 +921,7 @@ func (c *Controller) applyLockFileLocked(lock *LockFile) {
 	c.pid = lock.PID
 	c.port = lock.Port
 	c.apiPort = lock.APIPort
+	c.redirPort = lock.RedirPort
 	if lock.APIHost != "" {
 		c.apiHost = lock.APIHost
 	}
@@ -885,7 +987,7 @@ func (c *Controller) monitorExternalProxy(pid int, port int, host string) {
 
 func isTCPReachable(host string, port int) bool {
 	addr := fmt.Sprintf("%s:%d", host, port)
-	conn, err := net.DialTimeout("tcp", addr, 800*time.Millisecond)
+	conn, err := dialTimeout("tcp", addr, 800*time.Millisecond)
 	if err != nil {
 		return false
 	}

@@ -10,10 +10,11 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Proxy     ProxyConfig     `yaml:"proxy"`
-	Language  string          `yaml:"language"`
-	SpeedTest SpeedTestConfig `yaml:"speedtest"`
-	UI        UIConfig        `yaml:"ui"`
+	Proxy        ProxyConfig        `yaml:"proxy"`
+	Subscription SubscriptionConfig `yaml:"subscription"`
+	Language     string             `yaml:"language"`
+	SpeedTest    SpeedTestConfig    `yaml:"speedtest"`
+	UI           UIConfig           `yaml:"ui"`
 }
 
 // ProxyConfig represents proxy port configuration
@@ -21,6 +22,16 @@ type ProxyConfig struct {
 	MixedPort   int    `yaml:"mixed_port"` // Single port for both SOCKS5 and HTTP
 	AllowLan    bool   `yaml:"allow_lan"`
 	BindAddress string `yaml:"bind_address"`
+	TunEnabled  bool   `yaml:"tun_enabled"`
+	// DockerRedirectTCP redirects Docker container TCP traffic (internet-bound) to mihomo redir-port via iptables.
+	// Linux only; requires root to apply iptables rules.
+	DockerRedirectTCP bool `yaml:"docker_redirect_tcp"`
+}
+
+// SubscriptionConfig represents subscription-related configuration.
+type SubscriptionConfig struct {
+	// UpdateViaProxy controls whether URL subscriptions are fetched via the local proxy core (if running).
+	UpdateViaProxy bool `yaml:"update_via_proxy"`
 }
 
 // SpeedTestConfig represents speed test configuration
@@ -34,20 +45,31 @@ type UIConfig struct {
 	// ServerDisplay controls whether the Nodes tab shows the "Server" column.
 	// Supported values: show | blur | off.
 	ServerDisplay        string `yaml:"server_display"`
+	SplashLastShownAt    string `yaml:"splash_last_shown_at,omitempty"`
 	ActiveSubscriptionID string `yaml:"active_subscription_id,omitempty"`
+	SelectedNodeSubID    string `yaml:"selected_node_sub_id,omitempty"`
+	SelectedNodeName     string `yaml:"selected_node_name,omitempty"`
+	SelectedNodeServer   string `yaml:"selected_node_server,omitempty"`
+	SelectedNodePort     int    `yaml:"selected_node_port,omitempty"`
+	SelectedNodeType     string `yaml:"selected_node_type,omitempty"`
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Proxy: ProxyConfig{
-			MixedPort:   17890,
-			AllowLan:    true,
-			BindAddress: "0.0.0.0",
+			MixedPort:         17890,
+			AllowLan:          true,
+			BindAddress:       "0.0.0.0",
+			TunEnabled:        false,
+			DockerRedirectTCP: false,
+		},
+		Subscription: SubscriptionConfig{
+			UpdateViaProxy: false,
 		},
 		Language: "en_us",
 		SpeedTest: SpeedTestConfig{
-			Concurrent: 10,
+			Concurrent: 50,
 			Timeout:    5 * time.Second,
 		},
 		UI: UIConfig{

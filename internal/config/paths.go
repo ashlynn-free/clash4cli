@@ -2,19 +2,38 @@ package config
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
+	"strings"
 )
 
 // GetBaseDir returns the base directory.
 //
 // Default: ~/.clash4cli
 func GetBaseDir() (string, error) {
-	home, err := os.UserHomeDir()
+	if v := strings.TrimSpace(os.Getenv("CLASH4CLI_HOME")); v != "" {
+		return filepath.Clean(v), nil
+	}
+
+	home, err := userHomeDir()
 	if err != nil {
 		return "", err
 	}
 
 	return filepath.Join(home, ".clash4cli"), nil
+}
+
+func userHomeDir() (string, error) {
+	// When running under sudo, use the original invoking user's home directory so
+	// root-only helpers (iptables) operate on the correct ~/.clash4cli.
+	if os.Geteuid() == 0 {
+		if sudoUser := strings.TrimSpace(os.Getenv("SUDO_USER")); sudoUser != "" && sudoUser != "root" {
+			if u, err := user.Lookup(sudoUser); err == nil && u.HomeDir != "" {
+				return u.HomeDir, nil
+			}
+		}
+	}
+	return os.UserHomeDir()
 }
 
 func dirExists(path string) bool {

@@ -143,7 +143,7 @@ runCommand:
 	if useProxychains {
 		if !quietMode {
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Mode: proxychains4\033[0m\n")
-			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Proxy: http-connect://%s:%d\033[0m\n", proxyHost, port)
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Proxy: socks5://%s:%d\033[0m\n", proxyHost, port)
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Command: %s\033[0m\n", args[0])
 			fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
 		}
@@ -209,7 +209,7 @@ func verifyProxy(host string, port int) bool {
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		return false
@@ -221,47 +221,99 @@ func verifyProxy(host string, port int) bool {
 // findProxychains looks for proxychains binary and library
 // Returns (binaryPath, libPath) or ("", "") if not found
 func findProxychains() (string, string) {
-	// Get executable directory
 	execPath, err := os.Executable()
 	if err != nil {
 		execPath = ""
 	}
 	execDir := filepath.Dir(execPath)
 
+	cwd := ""
+	if d, err := os.Getwd(); err == nil {
+		cwd = d
+	}
+
+	env := proxychainsDiscoveryEnv{
+		goos:      runtime.GOOS,
+		goarch:    runtime.GOARCH,
+		execDir:   execDir,
+		cwd:       cwd,
+		lookPath:  exec.LookPath,
+		getenv:    os.Getenv,
+		fileExist: fileExists,
+		packagedDirs: []string{
+			"/usr/lib/clash4cli",
+			"/usr/lib64/clash4cli",
+			"/usr/local/lib/clash4cli",
+			"/opt/homebrew/lib/clash4cli",
+		},
+	}
+
+	return findProxychainsWith(env)
+}
+
+type proxychainsDiscoveryEnv struct {
+	goos         string
+	goarch       string
+	execDir      string
+	cwd          string
+	lookPath     func(string) (string, error)
+	getenv       func(string) string
+	fileExist    func(string) bool
+	packagedDirs []string
+}
+
+func findProxychainsWith(env proxychainsDiscoveryEnv) (string, string) {
+	if env.lookPath == nil {
+		env.lookPath = exec.LookPath
+	}
+	if env.getenv == nil {
+		env.getenv = os.Getenv
+	}
+	if env.fileExist == nil {
+		env.fileExist = fileExists
+	}
+
 	// Determine library names based on OS.
 	// proxychains-ng builds the library as libproxychains4.so even on macOS.
 	libNames := []string{"libproxychains4.so"}
-	if runtime.GOOS == "darwin" {
+	if env.goos == "darwin" {
 		libNames = []string{"libproxychains4.so", "libproxychains4.dylib"}
 	}
 
 	// 1. Check bundled proxychains (same directory as c4cgo)
 	for _, libName := range libNames {
-		if bundledBin, bundledLib := findBundledProxychains(execDir, libName); bundledBin != "" {
+		if bundledBin, bundledLib := findBundledProxychains(env.execDir, libName, env.fileExist); bundledBin != "" {
 			return bundledBin, bundledLib
 		}
 	}
 
 	// 2. Check repo-style third_party layout (useful for dev builds)
 	for _, libName := range libNames {
-		if thirdPartyBin, thirdPartyLib := findThirdPartyProxychains(execDir, libName); thirdPartyBin != "" {
+		if thirdPartyBin, thirdPartyLib := findThirdPartyProxychains(env.execDir, env.goos, env.goarch, libName, env.fileExist); thirdPartyBin != "" {
 			return thirdPartyBin, thirdPartyLib
 		}
 	}
-	if cwd, err := os.Getwd(); err == nil {
+	if env.cwd != "" {
 		for _, libName := range libNames {
-			if thirdPartyBin, thirdPartyLib := findThirdPartyProxychains(cwd, libName); thirdPartyBin != "" {
+			if thirdPartyBin, thirdPartyLib := findThirdPartyProxychains(env.cwd, env.goos, env.goarch, libName, env.fileExist); thirdPartyBin != "" {
 				return thirdPartyBin, thirdPartyLib
 			}
 		}
 	}
 
-	// 3. Check system proxychains4
-	if path, err := exec.LookPath("proxychains4"); err == nil {
+	// 3. Check packaged layout (deb/rpm/Homebrew-style)
+	for _, libName := range libNames {
+		if bin, lib := findPackagedProxychains(env.packagedDirs, libName, env.fileExist); bin != "" {
+			return bin, lib
+		}
+	}
+
+	// 4. Check system proxychains4
+	if path, err := env.lookPath("proxychains4"); err == nil {
 		// Try to find the library near the binary or in common locations
 		libPath := ""
 		for _, libName := range libNames {
-			if p := findProxychainsLib(path, libName); p != "" {
+			if p := findProxychainsLib(path, libName, env.getenv, env.fileExist); p != "" {
 				libPath = p
 				break
 			}
@@ -269,11 +321,11 @@ func findProxychains() (string, string) {
 		return path, libPath
 	}
 
-	// 4. Check system proxychains
-	if path, err := exec.LookPath("proxychains"); err == nil {
+	// 5. Check system proxychains
+	if path, err := env.lookPath("proxychains"); err == nil {
 		libPath := ""
 		for _, libName := range libNames {
-			if p := findProxychainsLib(path, libName); p != "" {
+			if p := findProxychainsLib(path, libName, env.getenv, env.fileExist); p != "" {
 				libPath = p
 				break
 			}
@@ -289,28 +341,42 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func findBundledProxychains(execDir, libName string) (string, string) {
+func findBundledProxychains(execDir, libName string, exists func(string) bool) (string, string) {
 	bundledBin := filepath.Join(execDir, "proxychains4")
 	bundledLib := filepath.Join(execDir, libName)
-	if fileExists(bundledBin) && fileExists(bundledLib) {
+	if exists(bundledBin) && exists(bundledLib) {
 		return bundledBin, bundledLib
 	}
 	return "", ""
 }
 
-func findThirdPartyProxychains(baseDir, libName string) (string, string) {
-	platformDir := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
+func findThirdPartyProxychains(baseDir, goos, goarch, libName string, exists func(string) bool) (string, string) {
+	platformDir := fmt.Sprintf("%s-%s", goos, goarch)
 	thirdPartyDir := filepath.Join(baseDir, "third_party", "proxychains", platformDir)
 	thirdPartyBin := filepath.Join(thirdPartyDir, "proxychains4")
 	thirdPartyLib := filepath.Join(thirdPartyDir, libName)
-	if fileExists(thirdPartyBin) && fileExists(thirdPartyLib) {
+	if exists(thirdPartyBin) && exists(thirdPartyLib) {
 		return thirdPartyBin, thirdPartyLib
 	}
 	return "", ""
 }
 
+func findPackagedProxychains(candidateDirs []string, libName string, exists func(string) bool) (string, string) {
+	if len(candidateDirs) == 0 {
+		return "", ""
+	}
+	for _, dir := range candidateDirs {
+		bin := filepath.Join(dir, "proxychains4")
+		lib := filepath.Join(dir, libName)
+		if exists(bin) && exists(lib) {
+			return bin, lib
+		}
+	}
+	return "", ""
+}
+
 // findProxychainsLib searches for the proxychains library in common locations
-func findProxychainsLib(binaryPath, libName string) string {
+func findProxychainsLib(binaryPath, libName string, getenv func(string) string, exists func(string) bool) string {
 	binDir := filepath.Dir(binaryPath)
 
 	// Common library locations relative to binary
@@ -329,14 +395,14 @@ func findProxychainsLib(binaryPath, libName string) string {
 	}
 
 	// Also check LD_LIBRARY_PATH
-	if ldPath := os.Getenv("LD_LIBRARY_PATH"); ldPath != "" {
+	if ldPath := getenv("LD_LIBRARY_PATH"); ldPath != "" {
 		for _, dir := range filepath.SplitList(ldPath) {
 			candidates = append(candidates, filepath.Join(dir, libName))
 		}
 	}
 
 	for _, candidate := range candidates {
-		if fileExists(candidate) {
+		if exists(candidate) {
 			return candidate
 		}
 	}
@@ -382,7 +448,7 @@ tcp_read_time_out 15000
 tcp_connect_time_out 8000
 
 [ProxyList]
-http %s %d
+socks5 %s %d
 `, host, port)
 
 	// Write config to temp file
@@ -441,8 +507,9 @@ func runWithEnvProxy(host string, port int, args []string) (int, error) {
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	httpProxy := fmt.Sprintf("http://%s:%d", host, port)
-	socksProxy := fmt.Sprintf("socks5://%s:%d", host, port)
+	hostPort := net.JoinHostPort(host, strconv.Itoa(port))
+	httpProxy := "http://" + hostPort
+	socksProxy := "socks5://" + hostPort
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = append(os.Environ(),

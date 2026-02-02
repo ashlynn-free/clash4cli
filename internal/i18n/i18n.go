@@ -73,6 +73,9 @@ type SettingsMessages struct {
 	SocksPort     string `yaml:"socks_port"`
 	HTTPPort      string `yaml:"http_port"`
 	AllowLan      string `yaml:"allow_lan"`
+	LinuxFeatures string `yaml:"linux_features"`
+	Tun           string `yaml:"tun"`
+	DockerTCP     string `yaml:"docker_tcp"`
 	Language      string `yaml:"language"`
 	Concurrent    string `yaml:"concurrent"`
 	Timeout       string `yaml:"timeout"`

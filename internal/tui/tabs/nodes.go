@@ -32,6 +32,9 @@ type NodesTab struct {
 	connectedNodeName string
 	connectedIcon     string
 	serverDisplay     string // show|blur|off
+	preselectName     string
+	preselectServer   string
+	preselectPort     int
 }
 
 // NewNodesTab creates a new nodes tab
@@ -251,6 +254,7 @@ func (t *NodesTab) updateTableRows() {
 		rows[i] = base
 	}
 	t.table.SetRows(rows)
+	t.applyPreselect()
 }
 
 func (t *NodesTab) SetServerDisplay(mode string) {
@@ -264,6 +268,38 @@ func (t *NodesTab) SetServerDisplay(mode string) {
 		t.table.SetColumns(calcNodeTableColumns(t.width, t.serverDisplay))
 	}
 	t.updateTableRows()
+}
+
+func (t *NodesTab) SetPreselect(node *subscription.Node) {
+	if node == nil {
+		return
+	}
+	t.preselectName = node.Name
+	t.preselectServer = node.Server
+	t.preselectPort = node.Port
+	t.applyPreselect()
+}
+
+func (t *NodesTab) applyPreselect() {
+	if len(t.nodes) == 0 {
+		return
+	}
+	if t.preselectServer != "" && t.preselectPort > 0 {
+		for i := range t.nodes {
+			if t.nodes[i].Server == t.preselectServer && t.nodes[i].Port == t.preselectPort {
+				t.table.SetSelected(i)
+				return
+			}
+		}
+	}
+	if t.preselectName != "" {
+		for i := range t.nodes {
+			if t.nodes[i].Name == t.preselectName {
+				t.table.SetSelected(i)
+				return
+			}
+		}
+	}
 }
 
 func maskMiddle(s string) string {

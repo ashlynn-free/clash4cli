@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 	"rocket4cli/internal/config"
@@ -13,6 +14,7 @@ import (
 // MihomoConfig represents the mihomo configuration
 type MihomoConfig struct {
 	MixedPort          int              `yaml:"mixed-port,omitempty"`
+	RedirPort          int              `yaml:"redir-port,omitempty"`
 	Port               int              `yaml:"port,omitempty"`
 	SocksPort          int              `yaml:"socks-port,omitempty"`
 	AllowLan           bool             `yaml:"allow-lan"`
@@ -21,9 +23,24 @@ type MihomoConfig struct {
 	LogLevel           string           `yaml:"log-level"`
 	ExternalController string           `yaml:"external-controller,omitempty"`
 	Secret             string           `yaml:"secret,omitempty"`
+	Tun                *TunConfig       `yaml:"tun,omitempty"`
 	Proxies            []map[string]any `yaml:"proxies"`
 	ProxyGroups        []ProxyGroup     `yaml:"proxy-groups"`
 	Rules              []string         `yaml:"rules"`
+}
+
+type TunConfig struct {
+	Enable              bool   `yaml:"enable"`
+	Stack               string `yaml:"stack,omitempty"`
+	AutoRoute           bool   `yaml:"auto-route,omitempty"`
+	AutoDetectIface     bool   `yaml:"auto-detect-interface,omitempty"`
+	StrictRoute         bool   `yaml:"strict-route,omitempty"`
+	RouteAddressSet     []any  `yaml:"route-address-set,omitempty"`
+	RouteExcludeSet     []any  `yaml:"route-exclude-address-set,omitempty"`
+	DNSHijack           []any  `yaml:"dns-hijack,omitempty"`
+	MTU                 int    `yaml:"mtu,omitempty"`
+	Device              string `yaml:"device,omitempty"`
+	EndpointIndependent bool   `yaml:"endpoint-independent-nat,omitempty"`
 }
 
 // ProxyGroup represents a proxy group
@@ -36,7 +53,7 @@ type ProxyGroup struct {
 }
 
 // GenerateConfig generates mihomo configuration from nodes
-func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, mixedPort int, apiPort int, apiHost string) (*MihomoConfig, error) {
+func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, mixedPort int, apiPort int, apiHost string, redirPort int) (*MihomoConfig, error) {
 	if mixedPort <= 0 {
 		mixedPort = 17890
 		if cfg != nil && cfg.Proxy.MixedPort > 0 {
@@ -65,6 +82,7 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 
 	mihomoConfig := &MihomoConfig{
 		MixedPort:          mixedPort, // Single port for both SOCKS5 and HTTP
+		RedirPort:          redirPort,
 		AllowLan:           allowLan,
 		BindAddress:        bindAddress,
 		Mode:               "rule", // Drive all traffic via our "Proxy" selector group
@@ -74,6 +92,15 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 		Rules: []string{
 			"MATCH,Proxy",
 		},
+	}
+
+	if cfg != nil && cfg.Proxy.TunEnabled && runtime.GOOS == "linux" {
+		mihomoConfig.Tun = &TunConfig{
+			Enable:          true,
+			Stack:           "system",
+			AutoRoute:       true,
+			AutoDetectIface: true,
+		}
 	}
 
 	proxyNames := make([]string, 0, len(nodes))

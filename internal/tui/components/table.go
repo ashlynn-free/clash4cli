@@ -81,6 +81,34 @@ func (t *Table) Selected() int {
 	return t.selected
 }
 
+// SetSelected sets the selected row index and adjusts the scroll offset so the
+// selected row stays visible.
+func (t *Table) SetSelected(index int) {
+	if len(t.rows) == 0 {
+		t.selected = 0
+		t.offset = 0
+		return
+	}
+
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(t.rows) {
+		index = len(t.rows) - 1
+	}
+	t.selected = index
+
+	if t.selected < t.offset {
+		t.offset = t.selected
+	}
+	if t.height > 0 && t.selected >= t.offset+t.height {
+		t.offset = t.selected - t.height + 1
+		if t.offset < 0 {
+			t.offset = 0
+		}
+	}
+}
+
 // SelectedRow returns the selected row data
 func (t *Table) SelectedRow() []string {
 	if t.selected >= 0 && t.selected < len(t.rows) {

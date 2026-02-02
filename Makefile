@@ -35,7 +35,8 @@ TARGETS := \
 	linux/amd64 \
 	linux/arm64
 
-.PHONY: all build clean package packages deps proxychains proxychains_all mihomo mihomo_all release $(TARGETS)
+.PHONY: all build clean package packages deps proxychains proxychains_all mihomo mihomo_all release linux linux_only linux_deps $(TARGETS)
+.PHONY: deb deb_amd64 deb_arm64 rpm rpm_amd64 rpm_arm64 linux_pkgs
 
 # Cross-platform: build all packages
 all: packages
@@ -84,6 +85,33 @@ release: clean $(TARGETS)
 # Alias: build all platform tar.gz packages
 packages: release
 
+# Build all Linux artifacts: tar.gz + deb + rpm (amd64 + arm64)
+linux_only: linux_pkgs linux/amd64 linux/arm64
+
+# Full release shortcut: all platform tar.gz + linux deb/rpm
+linux: release linux_pkgs
+
+linux_deps: deps linux
+
+# Linux packages (.deb/.rpm) via nfpm (requires `nfpm` installed)
+deb_amd64: linux/amd64
+	@./scripts/package_nfpm.sh --arch amd64 --packager deb
+
+deb_arm64: linux/arm64
+	@./scripts/package_nfpm.sh --arch arm64 --packager deb
+
+deb: deb_amd64 deb_arm64
+
+rpm_amd64: linux/amd64
+	@./scripts/package_nfpm.sh --arch amd64 --packager rpm
+
+rpm_arm64: linux/arm64
+	@./scripts/package_nfpm.sh --arch arm64 --packager rpm
+
+rpm: rpm_amd64 rpm_arm64
+
+linux_pkgs: deb rpm
+
 # Cross-compile targets
 darwin/amd64:
 	@$(MAKE) build-target GOOS=darwin GOARCH=amd64
@@ -120,6 +148,14 @@ build-target:
 		echo "  Error: mihomo binary missing for $(GOOS)/$(GOARCH)."; \
 		echo "         Run: make mihomo_all (or make deps)"; \
 		exit 1; \
+	fi
+	@if [ -f "third_party/mihomo/mihomo-$(GOOS)-$(GOARCH).version" ]; then \
+		cp -f third_party/mihomo/mihomo-$(GOOS)-$(GOARCH).version $(OUTPUT_DIR)/mihomo.version; \
+		echo "  Included mihomo version file"; \
+	fi
+	@if [ -f "third_party/mihomo/LICENSE.mihomo" ]; then \
+		cp -f third_party/mihomo/LICENSE.mihomo $(OUTPUT_DIR)/LICENSE.mihomo; \
+		echo "  Included mihomo license notice"; \
 	fi
 
 	@# Copy proxychains if exists for this platform
@@ -191,6 +227,12 @@ help:
 	@echo "  make proxychains_all Fetch/build proxychains-ng (darwin amd64/arm64 + linux amd64/arm64)"
 	@echo "  make mihomo       Fetch mihomo (current platform)"
 	@echo "  make mihomo_all   Fetch mihomo (darwin amd64/arm64 + linux amd64/arm64)"
+	@echo "  make linux        Build all tar.gz + linux deb/rpm"
+	@echo "  make linux_only   Build linux tar.gz + deb + rpm (amd64 + arm64)"
+	@echo "  make linux_deps   Fetch deps then build all artifacts"
+	@echo "  make deb          Build linux .deb (amd64 + arm64) via nfpm"
+	@echo "  make rpm          Build linux .rpm (amd64 + arm64) via nfpm"
+	@echo "  make linux_pkgs   Build linux .deb + .rpm (amd64 + arm64)"
 	@echo "  make release      Alias of 'make all' (kept for compatibility)"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make install      Install to /usr/local/bin"

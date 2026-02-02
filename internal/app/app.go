@@ -2,8 +2,16 @@ package app
 
 import (
 	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/logger"
@@ -15,12 +23,13 @@ import (
 
 // App represents the main application
 type App struct {
-	cfg        *config.Config
-	subManager *subscription.Manager
-	nodeMgr    *node.Manager
-	proxyCtrl  *proxy.Controller
-	lock       *instanceLock
-	version    string
+	cfg         *config.Config
+	subManager  *subscription.Manager
+	nodeMgr     *node.Manager
+	proxyCtrl   *proxy.Controller
+	lock        *instanceLock
+	version     string
+	startupWarn string
 }
 
 // New creates a new application instance
@@ -70,14 +79,46 @@ func New(version string) (*App, error) {
 
 	nodeMgr := node.NewManager(subManager, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
 	proxyCtrl := proxy.NewController(cfg)
+	subManager.SetUpdateViaProxy(cfg.Subscription.UpdateViaProxy)
+	subManager.SetProxyProvider(func() (*url.URL, error) {
+		lock, err := proxy.ReadLockFile()
+		if err != nil || lock == nil {
+			return nil, nil
+		}
+		if lock.Port <= 0 || lock.Port >= 65536 {
+			return nil, nil
+		}
+		host := lock.ProxyHost
+		if strings.TrimSpace(host) == "" {
+			host = "127.0.0.1"
+		}
+		return &url.URL{
+			Scheme: "http",
+			Host:   net.JoinHostPort(host, strconv.Itoa(lock.Port)),
+		}, nil
+	})
+
+	startupWarn := ""
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 && cfg != nil && (cfg.Proxy.TunEnabled || cfg.Proxy.DockerRedirectTCP) {
+		var features []string
+		if cfg.Proxy.TunEnabled {
+			features = append(features, "TUN")
+		}
+		if cfg.Proxy.DockerRedirectTCP {
+			features = append(features, "Docker 劫持")
+		}
+		feat := strings.Join(features, "/")
+		startupWarn = fmt.Sprintf("已启用需要 root 的功能（%s）。\n当前不是 root 运行，这些功能不会生效。\n请使用 sudo 启动 c4c（或授予 CAP_NET_ADMIN）。\n提示：sudo 启动时默认仍使用 SUDO_USER 的 ~/.clash4cli（可通过 CLASH4CLI_HOME 覆盖）。", feat)
+	}
 
 	a := &App{
-		cfg:        cfg,
-		subManager: subManager,
-		nodeMgr:    nodeMgr,
-		proxyCtrl:  proxyCtrl,
-		lock:       lock,
-		version:    version,
+		cfg:         cfg,
+		subManager:  subManager,
+		nodeMgr:     nodeMgr,
+		proxyCtrl:   proxyCtrl,
+		lock:        lock,
+		version:     version,
+		startupWarn: startupWarn,
 	}
 	releaseLockOnError = false
 	return a, nil
@@ -85,7 +126,26 @@ func New(version string) (*App, error) {
 
 // Run starts the TUI application
 func (a *App) Run() error {
-	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.proxyCtrl, a.version)
+	// Reset any leaked terminal attributes (e.g. underline/reverse) before
+	// entering the alternate screen. tmux can preserve these attributes across
+	// programs, causing "garbled" UI where spaces render as underscores.
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[0m")
+
+	// Work around tmux setups where TERM is set to "screen" (no "color" suffix),
+	// which can cause termenv to report Ascii and disable all styling.
+	//
+	// Recommended fix for users is still: set tmux default-terminal to
+	// "tmux-256color" or "screen-256color".
+	if os.Getenv("TMUX") != "" {
+		r := lipgloss.NewRenderer(os.Stdout)
+		if r.ColorProfile() == termenv.Ascii {
+			r.SetColorProfile(termenv.ANSI256)
+			lipgloss.SetDefaultRenderer(r)
+			logger.Warn("tmux detected but terminal reports no color (TERM=%q); forcing ANSI256 colors", os.Getenv("TERM"))
+		}
+	}
+
+	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.proxyCtrl, a.version, a.startupWarn)
 
 	p := tea.NewProgram(
 		model,

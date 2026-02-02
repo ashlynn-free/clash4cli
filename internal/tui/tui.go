@@ -71,6 +71,8 @@ type hideOverlayMsg struct {
 
 type splashDoneMsg struct{}
 
+const splashCooldown = 24 * time.Hour
+
 // Model represents the main TUI model
 type Model struct {
 	// Managers
@@ -86,6 +88,7 @@ type Model struct {
 	ready             bool
 	quitting          bool
 	version           string
+	startupWarning    string
 	showSplash        bool
 	activeSubID       string
 	selectedNode      *subscription.Node
@@ -93,6 +96,10 @@ type Model struct {
 	proxyMode         ProxyMode
 	overlayText       string
 	overlayID         int
+
+	trafficLastAt            time.Time
+	trafficLastUploadTotal   int64
+	trafficLastDownloadTotal int64
 
 	// Components
 	statusBar *components.StatusBar
@@ -105,19 +112,20 @@ type Model struct {
 }
 
 // New creates a new TUI model
-func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, proxyCtrl *proxy.Controller, version string) *Model {
+func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, proxyCtrl *proxy.Controller, version string, startupWarning string) *Model {
 	m := &Model{
-		cfg:         cfg,
-		subManager:  subMgr,
-		nodeMgr:     nodeMgr,
-		proxyCtrl:   proxyCtrl,
-		proxyMode:   ProxyModeDisconnect,
-		statusBar:   components.NewStatusBar(),
-		nodesTab:    tabs.NewNodesTab(nodeMgr),
-		subsTab:     tabs.NewSubscriptionsTab(subMgr),
-		settingsTab: tabs.NewSettingsTab(cfg),
-		logsTab:     tabs.NewLogsTab(),
-		version:     strings.TrimSpace(version),
+		cfg:            cfg,
+		subManager:     subMgr,
+		nodeMgr:        nodeMgr,
+		proxyCtrl:      proxyCtrl,
+		proxyMode:      ProxyModeDisconnect,
+		statusBar:      components.NewStatusBar(),
+		nodesTab:       tabs.NewNodesTab(nodeMgr),
+		subsTab:        tabs.NewSubscriptionsTab(subMgr),
+		settingsTab:    tabs.NewSettingsTab(cfg),
+		logsTab:        tabs.NewLogsTab(),
+		version:        strings.TrimSpace(version),
+		startupWarning: strings.TrimSpace(startupWarning),
 	}
 
 	if m.nodesTab != nil {
@@ -134,6 +142,7 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		}
 	}
 
+	m.restoreSelectionFromConfig()
 	m.restoreStateFromProxyLock()
 
 	return m
@@ -152,6 +161,126 @@ func (m *Model) persistActiveSubscription(id string) tea.Cmd {
 			logger.Warn("failed to save config: %v", err)
 		}
 		return nil
+	}
+}
+
+func (m *Model) persistSelectedNode(subID string, node *subscription.Node) tea.Cmd {
+	if m == nil || m.cfg == nil || node == nil {
+		return nil
+	}
+	if subID == "" {
+		subID = m.activeSubID
+	}
+	if m.cfg.UI.SelectedNodeSubID == subID &&
+		m.cfg.UI.SelectedNodeName == node.Name &&
+		m.cfg.UI.SelectedNodeServer == node.Server &&
+		m.cfg.UI.SelectedNodePort == node.Port &&
+		m.cfg.UI.SelectedNodeType == node.Type {
+		return nil
+	}
+
+	m.cfg.UI.SelectedNodeSubID = subID
+	m.cfg.UI.SelectedNodeName = node.Name
+	m.cfg.UI.SelectedNodeServer = node.Server
+	m.cfg.UI.SelectedNodePort = node.Port
+	m.cfg.UI.SelectedNodeType = node.Type
+
+	return func() tea.Msg {
+		if err := m.cfg.Save(); err != nil {
+			logger.Warn("failed to save config: %v", err)
+		}
+		return nil
+	}
+}
+
+func (m *Model) shouldShowSplash(now time.Time) bool {
+	if m == nil || m.cfg == nil {
+		return true
+	}
+	lastRaw := strings.TrimSpace(m.cfg.UI.SplashLastShownAt)
+	if lastRaw == "" {
+		return true
+	}
+	last, err := time.Parse(time.RFC3339, lastRaw)
+	if err != nil {
+		return true
+	}
+	if now.Before(last) {
+		// Clock skew; don't spam the splash.
+		return false
+	}
+	return now.Sub(last) >= splashCooldown
+}
+
+func (m *Model) persistSplashShown(now time.Time) tea.Cmd {
+	if m == nil || m.cfg == nil {
+		return nil
+	}
+	ts := now.UTC().Format(time.RFC3339)
+	if m.cfg.UI.SplashLastShownAt == ts {
+		return nil
+	}
+	m.cfg.UI.SplashLastShownAt = ts
+	return func() tea.Msg {
+		if err := m.cfg.Save(); err != nil {
+			logger.Warn("failed to save config: %v", err)
+		}
+		return nil
+	}
+}
+
+func (m *Model) showStartupWarningOverlay() tea.Cmd {
+	if m == nil || strings.TrimSpace(m.startupWarning) == "" {
+		return nil
+	}
+	m.overlayID++
+	id := m.overlayID
+	m.overlayText = m.startupWarning
+	return tea.Tick(6*time.Second, func(time.Time) tea.Msg {
+		return hideOverlayMsg{id: id}
+	})
+}
+
+func (m *Model) restoreSelectionFromConfig() {
+	if m == nil || m.cfg == nil || m.subManager == nil || m.nodeMgr == nil {
+		return
+	}
+	ui := m.cfg.UI
+
+	// Only restore selection for the active subscription (keeps UI self-consistent).
+	if ui.SelectedNodeSubID == "" || m.activeSubID == "" || ui.SelectedNodeSubID != m.activeSubID {
+		return
+	}
+
+	nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
+	var selected *subscription.Node
+	for i := range nodes {
+		n := &nodes[i]
+		if ui.SelectedNodeServer != "" && ui.SelectedNodePort > 0 {
+			if n.Server == ui.SelectedNodeServer && n.Port == ui.SelectedNodePort {
+				nodeCopy := *n
+				selected = &nodeCopy
+				break
+			}
+			continue
+		}
+		if ui.SelectedNodeName != "" && n.Name == ui.SelectedNodeName {
+			nodeCopy := *n
+			selected = &nodeCopy
+			break
+		}
+	}
+	if selected == nil {
+		return
+	}
+
+	m.selectedNode = selected
+	m.nodeMgr.Select(selected)
+	if m.statusBar != nil {
+		m.statusBar.SetSelectedNode(selected)
+	}
+	if m.nodesTab != nil {
+		m.nodesTab.SetPreselect(selected)
 	}
 }
 
@@ -193,6 +322,9 @@ func (m *Model) restoreStateFromProxyLock() {
 		m.selectedNode = node
 		m.nodeMgr.Select(node)
 		m.statusBar.SetSelectedNode(node)
+		if m.nodesTab != nil {
+			m.nodesTab.SetPreselect(node)
+		}
 	}
 
 	if lock.Node != "" {
@@ -281,6 +413,7 @@ func (m *Model) Init() tea.Cmd {
 		m.logsTab.Init(),
 		m.listenProxyLogs(),
 		m.listenAppLogs(),
+		m.pollTraffic(),
 	)
 }
 
@@ -296,10 +429,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.updateSizes()
 		if first {
-			m.showSplash = true
-			cmds = append(cmds, tea.Tick(1*time.Second, func(time.Time) tea.Msg {
-				return splashDoneMsg{}
-			}))
+			now := time.Now()
+			if m.shouldShowSplash(now) {
+				m.showSplash = true
+				cmds = append(cmds, m.persistSplashShown(now))
+				cmds = append(cmds, tea.Tick(1*time.Second, func(time.Time) tea.Msg {
+					return splashDoneMsg{}
+				}))
+			} else {
+				cmds = append(cmds, m.showStartupWarningOverlay())
+			}
 		}
 
 	case tea.KeyMsg:
@@ -348,20 +487,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedNode = focused
 				m.nodeMgr.Select(focused)
 				m.statusBar.SetSelectedNode(focused)
+				if m.nodesTab != nil {
+					m.nodesTab.SetPreselect(focused)
+				}
 				m.logsTab.AddLog("info", fmt.Sprintf("Selected node: %s", focused.Name))
 			}
+			persistCmd := m.persistSelectedNode(m.activeSubID, focused)
 
 			if m.proxyCtrl.GetStatus() == proxy.StatusRunning {
 				// If the user chose a different node, keep the current mode and just switch node.
 				// Only cycle mode when pressing Enter again on the same node.
 				if focused != nil && !sameAsPrev {
-					return m, m.switchNode(focused)
+					return m, tea.Batch(persistCmd, m.switchNode(focused))
 				}
-				return m, m.cycleProxyMode()
+				return m, tea.Batch(persistCmd, m.cycleProxyMode())
 			}
 
 			// When disconnected, pressing Enter always connects (Rule) for the focused node.
-			return m, m.startProxy()
+			return m, tea.Batch(persistCmd, m.startProxy())
 		}
 
 	case overlayMsg:
@@ -379,16 +522,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case splashDoneMsg:
 		m.showSplash = false
+		cmds = append(cmds, m.showStartupWarningOverlay())
 
 	case tabs.NodeSelectedMsg:
 		m.selectedNode = msg.Node
 		m.statusBar.SetSelectedNode(msg.Node)
+		if m.nodesTab != nil {
+			m.nodesTab.SetPreselect(msg.Node)
+		}
 		m.logsTab.AddLog("info", fmt.Sprintf("Selected node: %s", msg.Node.Name))
 		// If proxy is running, just switch node via API; otherwise start it
 		if m.proxyCtrl.GetStatus() == proxy.StatusRunning {
-			cmds = append(cmds, m.switchNode(msg.Node))
+			cmds = append(cmds, tea.Batch(m.persistSelectedNode(m.activeSubID, msg.Node), m.switchNode(msg.Node)))
 		} else {
-			cmds = append(cmds, m.startProxy())
+			cmds = append(cmds, tea.Batch(m.persistSelectedNode(m.activeSubID, msg.Node), m.startProxy()))
 		}
 
 	case tabs.SubscriptionAddedMsg:
@@ -476,6 +623,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.nodesTab != nil {
 			m.nodesTab.SetServerDisplay(m.cfg.UI.ServerDisplay)
 		}
+		if m.subManager != nil {
+			m.subManager.SetUpdateViaProxy(m.cfg.Subscription.UpdateViaProxy)
+		}
 
 	case tabs.RestartCoreMsg:
 		cmds = append(cmds, m.restartProxyCore())
@@ -494,6 +644,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Continue listening for more logs
 		cmds = append(cmds, m.listenAppLogs())
 
+	case trafficMsg:
+		// Keep polling.
+		cmds = append(cmds, m.pollTraffic())
+
+		if !msg.running {
+			m.resetTraffic()
+			break
+		}
+		if msg.err != nil {
+			// Best-effort: keep the last known values; don't spam logs.
+			break
+		}
+
+		uploadRate := int64(0)
+		downloadRate := int64(0)
+		if !m.trafficLastAt.IsZero() && msg.at.After(m.trafficLastAt) {
+			dt := msg.at.Sub(m.trafficLastAt).Seconds()
+			if dt > 0 && msg.uploadTotal >= m.trafficLastUploadTotal && msg.downloadTotal >= m.trafficLastDownloadTotal {
+				uploadRate = int64(float64(msg.uploadTotal-m.trafficLastUploadTotal) / dt)
+				downloadRate = int64(float64(msg.downloadTotal-m.trafficLastDownloadTotal) / dt)
+			}
+		}
+
+		// If the core restarted and counters reset, treat it as a baseline reset.
+		if msg.uploadTotal < m.trafficLastUploadTotal || msg.downloadTotal < m.trafficLastDownloadTotal {
+			uploadRate = 0
+			downloadRate = 0
+		}
+
+		m.trafficLastAt = msg.at
+		m.trafficLastUploadTotal = msg.uploadTotal
+		m.trafficLastDownloadTotal = msg.downloadTotal
+		if m.statusBar != nil {
+			m.statusBar.SetTraffic(msg.uploadTotal, msg.downloadTotal, uploadRate, downloadRate)
+		}
+
 	case proxyStatusMsg:
 		m.statusBar.SetProxyStatus(msg.status)
 		m.proxyMode = msg.mode
@@ -510,6 +696,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.proxyCtrl.GetStatus() != proxy.StatusRunning || m.proxyMode == ProxyModeDisconnect {
 			m.connectedNodeName = ""
+		}
+
+		if msg.status != proxy.StatusRunning || msg.mode == ProxyModeDisconnect {
+			m.resetTraffic()
 		}
 
 		// Update node list indicator.
@@ -644,10 +834,20 @@ func (m *Model) renderActiveTab() string {
 }
 
 func (m *Model) nextTab() {
+	// Discard unsaved settings when leaving Settings tab.
+	if m.activeTab == TabSettings && m.settingsTab != nil && m.cfg != nil {
+		m.settingsTab = tabs.NewSettingsTab(m.cfg)
+		m.settingsTab.SetSize(m.width, m.height-4)
+	}
 	m.activeTab = Tab((int(m.activeTab) + 1) % 4)
 }
 
 func (m *Model) prevTab() {
+	// Discard unsaved settings when leaving Settings tab.
+	if m.activeTab == TabSettings && m.settingsTab != nil && m.cfg != nil {
+		m.settingsTab = tabs.NewSettingsTab(m.cfg)
+		m.settingsTab.SetSize(m.width, m.height-4)
+	}
 	m.activeTab = Tab((int(m.activeTab) + 3) % 4)
 }
 
@@ -691,6 +891,40 @@ type proxyStatusMsg struct {
 	mode              ProxyMode
 	err               error
 	connectedNodeName string
+}
+
+type trafficMsg struct {
+	at            time.Time
+	running       bool
+	uploadTotal   int64
+	downloadTotal int64
+	err           error
+}
+
+func (m *Model) pollTraffic() tea.Cmd {
+	const interval = 1 * time.Second
+	return tea.Tick(interval, func(now time.Time) tea.Msg {
+		if m == nil || m.proxyCtrl == nil {
+			return trafficMsg{at: now, running: false}
+		}
+		if m.proxyCtrl.GetStatus() != proxy.StatusRunning {
+			return trafficMsg{at: now, running: false}
+		}
+		up, down, err := m.proxyCtrl.GetTrafficTotals()
+		if err != nil {
+			return trafficMsg{at: now, running: true, err: err}
+		}
+		return trafficMsg{at: now, running: true, uploadTotal: up, downloadTotal: down}
+	})
+}
+
+func (m *Model) resetTraffic() {
+	m.trafficLastAt = time.Time{}
+	m.trafficLastUploadTotal = 0
+	m.trafficLastDownloadTotal = 0
+	if m.statusBar != nil {
+		m.statusBar.ClearTraffic()
+	}
 }
 
 func (m *Model) toggleProxy() tea.Cmd {

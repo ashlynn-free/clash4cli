@@ -54,8 +54,9 @@ check() {
   esac
 }
 
-# Emails
-check "email addresses" '(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'
+# Emails (exclude placeholders / known non-PII domains)
+# Allowlist "example.*" and all its subdomains, to avoid false positives in test vectors (URI userinfo).
+check "email addresses" '(?i)[a-z0-9._%+-]+@(?!([a-z0-9-]+\.)*example\.(?:com|net|org|invalid)\b)(?!users\.noreply\.github\.com\b)(?!localhost\b)[a-z0-9.-]+\.[a-z]{2,}'
 
 # Absolute home paths (common accidental leaks)
 check "macOS home paths" '/Users/[A-Za-z0-9._-]+/'

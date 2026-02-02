@@ -1,0 +1,12 @@
+This distribution may bundle the `mihomo` binary from the upstream project:
+  MetaCubeX/mihomo
+
+License:
+  GNU General Public License v3.0 (GPL-3.0), per upstream.
+
+You can find the full license text here:
+  - https://www.gnu.org/licenses/gpl-3.0.txt
+  - Debian/Ubuntu: /usr/share/common-licenses/GPL-3
+
+Source code for the exact version can be obtained from the upstream release tag
+used by this repository (see MIHOMO_VERSION in the Makefile).

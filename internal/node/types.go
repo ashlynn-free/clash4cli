@@ -52,7 +52,7 @@ type SpeedTestOptions struct {
 // DefaultSpeedTestOptions returns default speed test options
 func DefaultSpeedTestOptions() SpeedTestOptions {
 	return SpeedTestOptions{
-		Concurrent:  10,
+		Concurrent:  50,
 		TestLatency: true,
 		TestSpeed:   true,
 		TestLoss:    true,

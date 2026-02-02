@@ -20,6 +20,9 @@ license of this repository.
 Source code for the exact version can be obtained from the upstream release tag
 `v1.19.19` (the release page includes "Source code (zip)" / "Source code (tar.gz)").
 
+The mihomo license notice is included in this repo as:
+`third_party/mihomo/LICENSE.mihomo`.
+
 ### proxychains-ng
 
 - Purpose: optional LD_PRELOAD-based proxy wrapper used by `c4cgo` (when available)

@@ -43,6 +43,8 @@ settings:
   socks_port: "SOCKS5 ポート"
   http_port: "HTTP ポート"
   allow_lan: "LAN 接続を許可"
+  tun: "TUN mode (Linux)"
+  docker_tcp: "Docker hijack (TCP, Linux)"
   language: "言語"
   concurrent: "同時テスト数"
   timeout: "テストタイムアウト"

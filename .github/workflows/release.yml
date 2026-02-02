@@ -38,6 +38,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
       - name: Cache Go build
         uses: actions/cache@v4
         with:
@@ -55,16 +58,24 @@ jobs:
           key: ${{ runner.os }}-deps-${{ hashFiles('Makefile') }}
 
       - name: Fetch deps
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make deps
 
       - name: Build package
         run: make linux/amd64
 
+      - name: Build deb/rpm
+        run: ./scripts/package_nfpm.sh --arch amd64 --packager deb,rpm
+
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: release-linux-amd64
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
 
   build-linux-arm64:
     name: Build linux/arm64
@@ -90,6 +101,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
       - name: Cache Go build
         uses: actions/cache@v4
         with:
@@ -107,16 +121,24 @@ jobs:
           key: ${{ runner.os }}-deps-${{ hashFiles('Makefile') }}
 
       - name: Fetch deps
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make deps
 
       - name: Build package
         run: make linux/arm64
 
+      - name: Build deb/rpm
+        run: ./scripts/package_nfpm.sh --arch arm64 --packager deb,rpm
+
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: release-linux-arm64
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
 
   build-darwin:
     name: Build darwin (amd64 + arm64)
@@ -154,6 +176,8 @@ jobs:
           key: ${{ runner.os }}-deps-${{ hashFiles('Makefile') }}
 
       - name: Fetch deps
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make deps
 
       - name: Build darwin/amd64 package
@@ -202,7 +226,9 @@ jobs:
           set -euo pipefail
           cd dist
           ls -la
-          sha256sum *.tar.gz > SHA256SUMS
+          shopt -s nullglob
+          files=( *.tar.gz *.deb *.rpm )
+          sha256sum "${files[@]}" > SHA256SUMS
 
       - name: Prepare release notes
         run: |
@@ -221,7 +247,7 @@ jobs:
           fi
 
           title="clash4cli ${TAG}"
-          files=(dist/*.tar.gz dist/SHA256SUMS)
+          files=(dist/*.tar.gz dist/*.deb dist/*.rpm dist/SHA256SUMS)
 
           if [[ -n "$(tr -d '[:space:]' < release-notes.md || true)" ]]; then
             gh release create "$TAG" "${files[@]}" --title "$title" --notes-file release-notes.md

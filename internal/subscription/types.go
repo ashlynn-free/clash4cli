@@ -17,6 +17,11 @@ type Subscription struct {
 	// It is only used when Source == "manual".
 	Content   string    `yaml:"content,omitempty" json:"content,omitempty"`
 	Nodes     []Node    `yaml:"nodes" json:"nodes"`
+	LastUpdateAttemptAt time.Time `yaml:"last_update_attempt_at,omitempty" json:"last_update_attempt_at,omitempty"`
+	LastUpdateError     string    `yaml:"last_update_error,omitempty" json:"last_update_error,omitempty"`
+	LastUpdateAdded     int       `yaml:"last_update_added,omitempty" json:"last_update_added,omitempty"`
+	LastUpdateRemoved   int       `yaml:"last_update_removed,omitempty" json:"last_update_removed,omitempty"`
+	LastUpdateViaProxy  bool      `yaml:"last_update_via_proxy,omitempty" json:"last_update_via_proxy,omitempty"`
 	UpdatedAt time.Time `yaml:"updated_at" json:"updated_at"`
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 }

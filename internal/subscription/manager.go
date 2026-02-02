@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,9 +21,11 @@ import (
 
 // Manager manages subscriptions
 type Manager struct {
-	subscriptions map[string]*Subscription
-	mu            sync.RWMutex
-	httpClient    *http.Client
+	subscriptions  map[string]*Subscription
+	mu             sync.RWMutex
+	httpClient     *http.Client
+	updateViaProxy bool
+	proxyProvider  func() (*url.URL, error)
 }
 
 // NewManager creates a new subscription manager
@@ -39,6 +42,22 @@ func NewManager() *Manager {
 			Transport: transport,
 		},
 	}
+}
+
+// SetUpdateViaProxy controls whether URL subscriptions can be fetched via the currently running local proxy.
+// The actual proxy address is resolved via the proxy provider (if set).
+func (m *Manager) SetUpdateViaProxy(enabled bool) {
+	m.mu.Lock()
+	m.updateViaProxy = enabled
+	m.mu.Unlock()
+}
+
+// SetProxyProvider sets a callback to resolve the HTTP proxy URL used for subscription updates.
+// When the provider returns nil (or errors), updates will fall back to direct fetch.
+func (m *Manager) SetProxyProvider(provider func() (*url.URL, error)) {
+	m.mu.Lock()
+	m.proxyProvider = provider
+	m.mu.Unlock()
 }
 
 // Load loads all subscriptions from disk
@@ -111,6 +130,8 @@ func (m *Manager) Add(name, url string) (*Subscription, error) {
 		return nil, fmt.Errorf("subscription URL must start with http:// or https://")
 	}
 
+	attemptAt := time.Now()
+
 	logger.Info("Adding subscription: %s", name)
 	logger.Info("URL: %s", url)
 
@@ -129,21 +150,29 @@ func (m *Manager) Add(name, url string) (*Subscription, error) {
 
 	// Fetch and parse (don't fail if fetch fails, just save with 0 nodes)
 	logger.Info("Fetching subscription content...")
-	nodes, err := m.fetchAndParse(url)
+	client, viaProxy := m.clientForUpdate()
+	nodes, err := m.fetchAndParseWithClient(url, client)
+	lastErr := ""
 	if err != nil {
 		logger.Warn("Failed to fetch/parse subscription: %v (will save with 0 nodes)", err)
 		nodes = []Node{} // Empty nodes, but still save the subscription
+		lastErr = err.Error()
 	}
 	logger.Info("Parsed %d nodes from subscription", len(nodes))
 
 	sub := &Subscription{
-		ID:        id,
-		Name:      name,
-		Source:    "url",
-		URL:       url,
-		Nodes:     nodes,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:                  id,
+		Name:                name,
+		Source:              "url",
+		URL:                 url,
+		Nodes:               nodes,
+		LastUpdateAttemptAt: attemptAt,
+		LastUpdateError:     lastErr,
+		LastUpdateAdded:     len(nodes),
+		LastUpdateRemoved:   0,
+		LastUpdateViaProxy:  viaProxy,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	m.mu.Lock()
@@ -170,6 +199,7 @@ func (m *Manager) AddManual(name, content string) (*Subscription, error) {
 		return nil, fmt.Errorf("subscription content cannot be empty")
 	}
 
+	attemptAt := time.Now()
 	nodes, err := Parse([]byte(content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse subscription content: %w", err)
@@ -184,13 +214,17 @@ func (m *Manager) AddManual(name, content string) (*Subscription, error) {
 	}
 
 	sub := &Subscription{
-		ID:        id,
-		Name:      name,
-		Source:    "manual",
-		Content:   content,
-		Nodes:     nodes,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:                  id,
+		Name:                name,
+		Source:              "manual",
+		Content:             content,
+		Nodes:               nodes,
+		LastUpdateAttemptAt: attemptAt,
+		LastUpdateAdded:     len(nodes),
+		LastUpdateRemoved:   0,
+		LastUpdateViaProxy:  false,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	m.mu.Lock()
@@ -215,6 +249,10 @@ func (m *Manager) Update(id string) error {
 	source := sub.Source
 	url := sub.URL
 	content := sub.Content
+	prevNodes := make([]Node, len(sub.Nodes))
+	copy(prevNodes, sub.Nodes)
+	useProxy := m.updateViaProxy
+	provider := m.proxyProvider
 	m.mu.RUnlock()
 
 	// Backward compatibility: infer source if missing
@@ -226,29 +264,63 @@ func (m *Manager) Update(id string) error {
 		}
 	}
 
+	attemptAt := time.Now()
+
 	var nodes []Node
 	var err error
+	viaProxy := false
 	switch source {
 	case "manual":
 		nodes, err = Parse([]byte(content))
 		if err != nil {
-			return fmt.Errorf("failed to parse subscription content: %w", err)
+			err = fmt.Errorf("failed to parse subscription content: %w", err)
+			break
 		}
 		if len(nodes) == 0 {
-			return fmt.Errorf("no valid nodes found in subscription content")
+			err = fmt.Errorf("no valid nodes found in subscription content")
+			break
 		}
 	case "url":
 		if url == "" {
-			return fmt.Errorf("subscription URL is empty")
+			err = fmt.Errorf("subscription URL is empty")
+			break
 		}
 		// Fetch without holding lock (network operation)
-		nodes, err = m.fetchAndParse(url)
+		client := m.httpClient
+		if useProxy && provider != nil {
+			if proxyURL, perr := provider(); perr == nil && proxyURL != nil && proxyURL.Host != "" {
+				client = m.clientWithProxy(proxyURL)
+				viaProxy = true
+			}
+		}
+		nodes, err = m.fetchAndParseWithClient(url, client)
 		if err != nil {
-			return err
+			break
 		}
 	default:
-		return fmt.Errorf("unknown subscription source: %s", source)
+		err = fmt.Errorf("unknown subscription source: %s", source)
 	}
+
+	if err != nil {
+		// Persist the update attempt metadata even on failure.
+		m.mu.Lock()
+		sub, exists = m.subscriptions[id]
+		if !exists {
+			m.mu.Unlock()
+			return fmt.Errorf("subscription was deleted during update")
+		}
+		sub.Source = source
+		sub.LastUpdateAttemptAt = attemptAt
+		sub.LastUpdateError = err.Error()
+		sub.LastUpdateAdded = 0
+		sub.LastUpdateRemoved = 0
+		sub.LastUpdateViaProxy = viaProxy
+		m.mu.Unlock()
+		_ = m.saveSub(sub)
+		return err
+	}
+
+	added, removed := diffNodeCounts(prevNodes, nodes)
 
 	// Re-check and update while holding lock
 	m.mu.Lock()
@@ -259,6 +331,11 @@ func (m *Manager) Update(id string) error {
 	}
 	sub.Source = source
 	sub.Nodes = nodes
+	sub.LastUpdateAttemptAt = attemptAt
+	sub.LastUpdateError = ""
+	sub.LastUpdateAdded = added
+	sub.LastUpdateRemoved = removed
+	sub.LastUpdateViaProxy = viaProxy
 	sub.UpdatedAt = time.Now()
 	m.mu.Unlock()
 
@@ -353,9 +430,12 @@ func (m *Manager) GetNodesForSubscription(id string) []Node {
 	return nodes
 }
 
-func (m *Manager) fetchAndParse(url string) ([]Node, error) {
+func (m *Manager) fetchAndParseWithClient(url string, client *http.Client) ([]Node, error) {
 	logger.Info("HTTP GET: %s", url)
-	resp, err := m.httpClient.Get(url)
+	if client == nil {
+		client = m.httpClient
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		logger.Error("HTTP request failed: %v", err)
 		return nil, fmt.Errorf("failed to fetch subscription: %w", err)
@@ -393,6 +473,50 @@ func (m *Manager) fetchAndParse(url string) ([]Node, error) {
 	return nodes, nil
 }
 
+func (m *Manager) clientForUpdate() (*http.Client, bool) {
+	m.mu.RLock()
+	enabled := m.updateViaProxy
+	provider := m.proxyProvider
+	m.mu.RUnlock()
+
+	if !enabled || provider == nil {
+		return m.httpClient, false
+	}
+	proxyURL, err := provider()
+	if err != nil || proxyURL == nil || proxyURL.Host == "" {
+		return m.httpClient, false
+	}
+	return m.clientWithProxy(proxyURL), true
+}
+
+func (m *Manager) clientWithProxy(proxyURL *url.URL) *http.Client {
+	if proxyURL == nil {
+		return m.httpClient
+	}
+
+	base := m.httpClient
+	timeout := 30 * time.Second
+	if base != nil && base.Timeout > 0 {
+		timeout = base.Timeout
+	}
+
+	var transport *http.Transport
+	if base != nil {
+		if bt, ok := base.Transport.(*http.Transport); ok && bt != nil {
+			transport = bt.Clone()
+		}
+	}
+	if transport == nil {
+		transport = &http.Transport{}
+	}
+	transport.Proxy = http.ProxyURL(proxyURL)
+
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+	}
+}
+
 func (m *Manager) saveSub(sub *Subscription) error {
 	subsDir, err := config.GetSubscriptionsDir()
 	if err != nil {
@@ -420,4 +544,34 @@ func randomID(nBytes int) (string, error) {
 		return "", fmt.Errorf("failed to generate id: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func diffNodeCounts(prev, next []Node) (added, removed int) {
+	prevCounts := make(map[string]int, len(prev))
+	for i := range prev {
+		prevCounts[nodeIdentityKey(prev[i])]++
+	}
+
+	nextCounts := make(map[string]int, len(next))
+	for i := range next {
+		nextCounts[nodeIdentityKey(next[i])]++
+	}
+
+	for k, n := range nextCounts {
+		if n > prevCounts[k] {
+			added += n - prevCounts[k]
+		}
+	}
+	for k, n := range prevCounts {
+		if n > nextCounts[k] {
+			removed += n - nextCounts[k]
+		}
+	}
+	return added, removed
+}
+
+func nodeIdentityKey(n Node) string {
+	// Include name to keep a stable identity from the user's perspective.
+	// Server is case-insensitive for diffing purposes.
+	return fmt.Sprintf("%s|%s|%d|%s", n.Type, strings.ToLower(n.Server), n.Port, n.Name)
 }

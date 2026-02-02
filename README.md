@@ -65,7 +65,7 @@ proxy:
 ```text
 [c4cgo] Using proxy at 127.0.0.1:17890 (node: 🇸🇬SG丨新加坡02)
 [c4cgo] Mode: proxychains4
-[c4cgo] Proxy: http-connect://127.0.0.1:17890
+[c4cgo] Proxy: socks5://127.0.0.1:17890
 [c4cgo] Command: curl
 ─────────────────────────────────────
 {

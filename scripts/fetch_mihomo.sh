@@ -133,13 +133,18 @@ download() {
   while [[ "$attempt" -le "$max_attempts" ]]; do
     if command -v curl >/dev/null 2>&1; then
       # Some environments have flaky HTTP/2; force HTTP/1.1 for reliability.
-      curl_args=( -fsSL --http1.1 --connect-timeout 10 --max-time 600 -o "$out" "$url" )
+      token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+      headers=()
+      if [[ -n "$token" && "$url" == https://api.github.com/* ]]; then
+        headers+=( -H "Authorization: Bearer ${token}" )
+      fi
       # Prefer downloading release assets via GitHub API (often works even when github.com is blocked),
       # which requires an octet-stream Accept header.
       if [[ "$url" == https://api.github.com/*/releases/assets/* ]]; then
-        curl_args=( -fsSL --http1.1 --connect-timeout 10 --max-time 600 -H "Accept: application/octet-stream" -o "$out" "$url" )
+        headers+=( -H "Accept: application/octet-stream" )
       fi
-      if curl "${curl_args[@]}"; then
+
+      if curl -fsSL --http1.1 --connect-timeout 10 --max-time 600 "${headers[@]}" -o "$out" "$url"; then
         return 0
       fi
     elif command -v wget >/dev/null 2>&1; then

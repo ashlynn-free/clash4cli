@@ -6,9 +6,11 @@ import (
 	"strconv"
 )
 
+var listenTCP = net.Listen
+
 func canListenTCP(host string, port int) bool {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenTCP("tcp", addr)
 	if err != nil {
 		return false
 	}
@@ -29,7 +31,7 @@ func pickTCPPort(host string, preferred int, scan int, forbidden map[int]struct{
 
 	if preferred <= 0 {
 		for i := 0; i < 20; i++ {
-			ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+			ln, err := listenTCP("tcp", net.JoinHostPort(host, "0"))
 			if err != nil {
 				return 0, err
 			}
@@ -58,4 +60,3 @@ func pickTCPPort(host string, preferred int, scan int, forbidden map[int]struct{
 	}
 	return 0, fmt.Errorf("no free port available on %s in range %d-%d", host, preferred, end)
 }
-

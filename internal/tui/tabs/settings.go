@@ -2,7 +2,10 @@ package tabs
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -10,11 +13,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/i18n"
+	"rocket4cli/internal/netctl"
+	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/tui/styles"
 )
 
 // SettingsSavedMsg is sent when settings are saved
-type SettingsSavedMsg struct{}
+type SettingsSavedMsg struct {
+	Message string
+}
 
 // SettingsErrorMsg is sent when settings could not be saved or validated
 type SettingsErrorMsg struct {
@@ -34,6 +41,7 @@ type FieldType int
 const (
 	FieldTypeInput FieldType = iota
 	FieldTypeSelect
+	FieldTypeHeader
 )
 
 // SettingsTab represents the settings tab
@@ -55,6 +63,7 @@ type settingField struct {
 	label     string
 	fieldType FieldType
 	key       string
+	disabled  bool
 	// For input type
 	input textinput.Model
 	// For select type
@@ -105,6 +114,33 @@ func NewSettingsTab(cfg *config.Config) *SettingsTab {
 		{label: i18n.M().Settings.Off, value: "false"},
 	}
 
+	updateViaProxyIdx := 1
+	if cfg.Subscription.UpdateViaProxy {
+		updateViaProxyIdx = 0
+	}
+	updateViaProxyOptions := []selectOption{
+		{label: i18n.M().Settings.On, value: "true"},
+		{label: i18n.M().Settings.Off, value: "false"},
+	}
+
+	tunIdx := 1
+	if cfg.Proxy.TunEnabled {
+		tunIdx = 0
+	}
+	tunOptions := []selectOption{
+		{label: i18n.M().Settings.On, value: "true"},
+		{label: i18n.M().Settings.Off, value: "false"},
+	}
+
+	dockerTCPIdx := 1
+	if cfg.Proxy.DockerRedirectTCP {
+		dockerTCPIdx = 0
+	}
+	dockerTCPOptions := []selectOption{
+		{label: i18n.M().Settings.On, value: "true"},
+		{label: i18n.M().Settings.Off, value: "false"},
+	}
+
 	concurrentInput := textinput.New()
 	concurrentInput.SetValue(fmt.Sprintf("%d", cfg.SpeedTest.Concurrent))
 	concurrentInput.CharLimit = 3
@@ -141,26 +177,74 @@ func NewSettingsTab(cfg *config.Config) *SettingsTab {
 			selectedIdx: allowLanIdx,
 		},
 		{
+			label:       "Update subscriptions via core proxy",
+			fieldType:   FieldTypeSelect,
+			key:         "update_via_proxy",
+			options:     updateViaProxyOptions,
+			selectedIdx: updateViaProxyIdx,
+		},
+	}
+
+	// Linux-only features: show on all platforms, but disable on non-Linux.
+	linuxSection := i18n.M().Settings.LinuxFeatures
+	if linuxSection == "" {
+		linuxSection = "Linux Exclusive Features"
+	}
+	fields = append(fields, settingField{
+		label:     linuxSection,
+		fieldType: FieldTypeHeader,
+	})
+
+	linuxOnlyDisabled := runtime.GOOS != "linux"
+
+	tunLabel := i18n.M().Settings.Tun
+	if tunLabel == "" {
+		tunLabel = "TUN mode (Linux)"
+	}
+	fields = append(fields, settingField{
+		label:       tunLabel,
+		fieldType:   FieldTypeSelect,
+		key:         "tun_enabled",
+		options:     tunOptions,
+		selectedIdx: tunIdx,
+		disabled:    linuxOnlyDisabled,
+	})
+
+	dockerLabel := i18n.M().Settings.DockerTCP
+	if dockerLabel == "" {
+		dockerLabel = "Docker hijack (TCP, Linux)"
+	}
+	fields = append(fields, settingField{
+		label:       dockerLabel,
+		fieldType:   FieldTypeSelect,
+		key:         "docker_redirect_tcp",
+		options:     dockerTCPOptions,
+		selectedIdx: dockerTCPIdx,
+		disabled:    linuxOnlyDisabled,
+	})
+
+	fields = append(fields,
+		settingField{
 			label:       i18n.M().Settings.Language,
 			fieldType:   FieldTypeSelect,
 			key:         "language",
 			options:     languageOptions,
 			selectedIdx: langIdx,
 		},
-		{
+		settingField{
 			label:       i18n.M().Settings.ServerDisplay,
 			fieldType:   FieldTypeSelect,
 			key:         "server_display",
 			options:     serverDisplayOptions,
 			selectedIdx: serverDisplayIdx,
 		},
-		{
+		settingField{
 			label:     i18n.M().Settings.Concurrent,
 			fieldType: FieldTypeInput,
 			input:     concurrentInput,
 			key:       "concurrent",
 		},
-	}
+	)
 
 	// Focus first field
 	fields[0].input.Focus()
@@ -201,7 +285,7 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 			return t, func() tea.Msg { return RestartCoreMsg{} }
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			// For select fields, move selection left
-			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeSelect {
+			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeSelect && !t.fields[t.focusedField].disabled {
 				field := &t.fields[t.focusedField]
 				field.selectedIdx--
 				if field.selectedIdx < 0 {
@@ -211,7 +295,7 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
 			// For select fields, move selection right
-			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeSelect {
+			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeSelect && !t.fields[t.focusedField].disabled {
 				field := &t.fields[t.focusedField]
 				field.selectedIdx++
 				if field.selectedIdx >= len(field.options) {
@@ -221,7 +305,7 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 			}
 		default:
 			// Pass to focused input
-			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
+			if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput && !t.fields[t.focusedField].disabled {
 				field := &t.fields[t.focusedField]
 				// Numeric-only behavior: accept only digits. On first typing after focus,
 				// clear the current value so the user can replace it easily.
@@ -248,7 +332,11 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		}
 
 	case SettingsSavedMsg:
-		t.message = i18n.M().Settings.Saved
+		if msg.Message != "" {
+			t.message = msg.Message
+		} else {
+			t.message = i18n.M().Settings.Saved
+		}
 		t.messageType = "success"
 		t.messageShow = true
 		return t, t.startFlash(3 * time.Second)
@@ -284,9 +372,14 @@ func (t *SettingsTab) focusNext() {
 	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
 		t.fields[t.focusedField].input.Blur()
 	}
-	t.focusedField++
-	if t.focusedField > len(t.fields)+1 {
-		t.focusedField = 0
+	for {
+		t.focusedField++
+		if t.focusedField > len(t.fields)+1 {
+			t.focusedField = 0
+		}
+		if t.focusedField >= len(t.fields) || t.isFieldFocusable(t.focusedField) {
+			break
+		}
 	}
 	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
 		t.fields[t.focusedField].input.Focus()
@@ -300,9 +393,14 @@ func (t *SettingsTab) focusPrev() {
 	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
 		t.fields[t.focusedField].input.Blur()
 	}
-	t.focusedField--
-	if t.focusedField < 0 {
-		t.focusedField = len(t.fields) + 1
+	for {
+		t.focusedField--
+		if t.focusedField < 0 {
+			t.focusedField = len(t.fields) + 1
+		}
+		if t.focusedField >= len(t.fields) || t.isFieldFocusable(t.focusedField) {
+			break
+		}
 	}
 	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
 		t.fields[t.focusedField].input.Focus()
@@ -310,6 +408,20 @@ func (t *SettingsTab) focusPrev() {
 	} else {
 		t.armedReplace = false
 	}
+}
+
+func (t *SettingsTab) isFieldFocusable(index int) bool {
+	if index < 0 || index >= len(t.fields) {
+		return false
+	}
+	f := t.fields[index]
+	if f.fieldType == FieldTypeHeader {
+		return false
+	}
+	if f.disabled {
+		return false
+	}
+	return true
 }
 
 func filterDigits(runes []rune) []rune {
@@ -345,11 +457,19 @@ func (t *SettingsTab) View() string {
 	var content string
 
 	for i, field := range t.fields {
+		if field.fieldType == FieldTypeHeader {
+			content += styles.Title.Render(field.label) + "\n\n"
+			continue
+		}
+
 		label := field.label
 		if i == t.focusedField {
 			label = styles.Primary.Render("▶ " + label)
 		} else {
 			label = "  " + label
+		}
+		if field.disabled {
+			label = styles.Muted.Render("  " + field.label)
 		}
 		content += label + "\n"
 
@@ -415,6 +535,9 @@ func (t *SettingsTab) renderSelect(field settingField, focused bool) string {
 	}
 	opt := field.options[field.selectedIdx]
 	label := " " + opt.label + " "
+	if field.disabled {
+		return styles.Muted.Render("◀") + " " + styles.Muted.Render(label) + " " + styles.Muted.Render("▶")
+	}
 	if focused {
 		label = styles.SelectOptionActive.Render(label)
 	} else {
@@ -436,6 +559,9 @@ func (t *SettingsTab) SetSize(width, height int) {
 
 func (t *SettingsTab) saveSettings() tea.Cmd {
 	return func() tea.Msg {
+		prevDocker := t.cfg.Proxy.DockerRedirectTCP
+		prevTun := t.cfg.Proxy.TunEnabled
+
 		// Parse and validate values
 		for _, field := range t.fields {
 			switch field.key {
@@ -454,6 +580,36 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 					t.cfg.Proxy.AllowLan = false
 				default:
 					return SettingsErrorMsg{Error: fmt.Errorf("invalid allow_lan value: %q", v)}
+				}
+			case "update_via_proxy":
+				v := field.options[field.selectedIdx].value
+				switch v {
+				case "true":
+					t.cfg.Subscription.UpdateViaProxy = true
+				case "false":
+					t.cfg.Subscription.UpdateViaProxy = false
+				default:
+					return SettingsErrorMsg{Error: fmt.Errorf("invalid update_via_proxy value: %q", v)}
+				}
+			case "tun_enabled":
+				v := field.options[field.selectedIdx].value
+				switch v {
+				case "true":
+					t.cfg.Proxy.TunEnabled = true
+				case "false":
+					t.cfg.Proxy.TunEnabled = false
+				default:
+					return SettingsErrorMsg{Error: fmt.Errorf("invalid tun_enabled value: %q", v)}
+				}
+			case "docker_redirect_tcp":
+				v := field.options[field.selectedIdx].value
+				switch v {
+				case "true":
+					t.cfg.Proxy.DockerRedirectTCP = true
+				case "false":
+					t.cfg.Proxy.DockerRedirectTCP = false
+				default:
+					return SettingsErrorMsg{Error: fmt.Errorf("invalid docker_redirect_tcp value: %q", v)}
 				}
 			case "language":
 				lang := field.options[field.selectedIdx].value
@@ -480,7 +636,53 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 			return SettingsErrorMsg{Error: err}
 		}
 
-		return SettingsSavedMsg{}
+		// Root-only side effects (Linux): apply/remove docker hijack iptables rules.
+		notice := ""
+		if runtime.GOOS == "linux" && prevTun != t.cfg.Proxy.TunEnabled && t.cfg.Proxy.TunEnabled && os.Geteuid() != 0 {
+			notice = "Saved. TUN requires root/CAP_NET_ADMIN. Re-run c4c with sudo and restart core."
+		}
+		if runtime.GOOS == "linux" {
+			desiredDocker := t.cfg.Proxy.DockerRedirectTCP
+
+			if os.Geteuid() != 0 {
+				if desiredDocker {
+					if notice == "" {
+						notice = "Saved. Docker hijack needs root to apply iptables. Re-run c4c with sudo and save again."
+					}
+				} else if prevDocker {
+					if notice == "" {
+						notice = "Saved. Docker hijack removal needs root. Re-run c4c with sudo and save again."
+					}
+				}
+			} else {
+				if desiredDocker {
+					bind := strings.TrimSpace(t.cfg.Proxy.BindAddress)
+					if !t.cfg.Proxy.AllowLan || bind == "127.0.0.1" || bind == "::1" {
+						if notice == "" {
+							notice = "Saved. WARN: Docker REDIRECT needs non-loopback bind; set allow_lan=true and bind_address=0.0.0.0."
+						}
+					}
+
+					lock, err := proxy.ReadLockFile()
+					if err != nil || lock == nil || lock.RedirPort <= 0 {
+						if notice == "" {
+							notice = "Saved. Restart core first to get redir-port, then save again to apply iptables."
+						}
+					} else if err := netctl.EnableDockerTCPRedirect(lock.RedirPort); err != nil {
+						return SettingsErrorMsg{Error: err}
+					} else if notice == "" {
+						notice = fmt.Sprintf("Docker hijack enabled (TCP). iptables -> redir-port %d", lock.RedirPort)
+					}
+				} else if prevDocker {
+					if err := netctl.DisableDockerTCPRedirect(); err != nil {
+						return SettingsErrorMsg{Error: err}
+					}
+					notice = "Docker hijack disabled (iptables removed)."
+				}
+			}
+		}
+
+		return SettingsSavedMsg{Message: notice}
 	}
 }
 
