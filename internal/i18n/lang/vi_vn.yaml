@@ -40,6 +40,8 @@ subscription:
   input_content: "Dán nội dung đăng ký:"
 
 settings:
+  mixed_port_label: "Cổng hỗn hợp (SOCKS5 + HTTP)"
+  mixed_port_help: "Đây là cổng cơ sở. Các cổng cục bộ khác sẽ được gán tuần tự từ cổng này (+1, +2, ...)."
   socks_port: "Cổng SOCKS5"
   http_port: "Cổng HTTP"
   allow_lan: "Cho phép kết nối LAN"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter để chọn"
   tab: "Tab để chuyển"
   arrows: "↑↓ để điều hướng"
+  lr_switch: "←→ chuyển"
 
 errors:
   load_config: "Không thể tải cấu hình"

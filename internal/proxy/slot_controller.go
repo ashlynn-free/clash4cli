@@ -198,10 +198,14 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 		forbidden = map[int]struct{}{}
 	}
 
-	mixedPort, err := pickTCPPort(proxyListenHost, baseMixed+slotID, 200, forbidden)
-	if err != nil {
+	mixedPort := baseMixed + slotID
+	if _, blocked := forbidden[mixedPort]; blocked {
 		c.status = StatusError
-		return fmt.Errorf("failed to pick a free mixed-port: %w", err)
+		return fmt.Errorf("mixed-port %d (slot %d) is already used by another slot", mixedPort, slotID)
+	}
+	if !canListenTCP(proxyListenHost, mixedPort) {
+		c.status = StatusError
+		return fmt.Errorf("mixed-port %d (slot %d) is already in use by another program; free the port or change base-mixed-port in config", mixedPort, slotID)
 	}
 	forbidden[mixedPort] = struct{}{}
 
@@ -209,10 +213,14 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 	if apiHost == "" {
 		apiHost = "127.0.0.1"
 	}
-	apiPort, err := pickTCPPort(apiHost, baseAPI+slotID, 200, forbidden)
-	if err != nil {
+	apiPort := baseAPI + slotID
+	if _, blocked := forbidden[apiPort]; blocked {
 		c.status = StatusError
-		return fmt.Errorf("failed to pick a free api port: %w", err)
+		return fmt.Errorf("api-port %d (slot %d) is already used by another slot", apiPort, slotID)
+	}
+	if !canListenTCP(apiHost, apiPort) {
+		c.status = StatusError
+		return fmt.Errorf("api-port %d (slot %d) is already in use by another program; free the port or change base-api-port in config", apiPort, slotID)
 	}
 
 	c.port = mixedPort

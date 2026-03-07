@@ -40,6 +40,8 @@ subscription:
   input_content: "Tempel konten langganan:"
 
 settings:
+  mixed_port_label: "Port campuran (SOCKS5 + HTTP)"
+  mixed_port_help: "Ini adalah port dasar. Port lokal lainnya dialokasikan berurutan berdasarkan port ini (+1, +2, ...)."
   socks_port: "Port SOCKS5"
   http_port: "Port HTTP"
   allow_lan: "Izinkan koneksi LAN"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter untuk memilih"
   tab: "Tab untuk berpindah"
   arrows: "↑↓ untuk navigasi"
+  lr_switch: "←→ berpindah"
 
 errors:
   load_config: "Gagal memuat konfigurasi"

@@ -34,6 +34,7 @@ type NodesTab struct {
 	height         int
 	testing        bool
 	cancelTest     context.CancelFunc
+	resultCh       <-chan node.TestResult
 	subscriptionID string
 	// Multi-slot indicators: node name → indicator
 	slotIndicators map[string]SlotIndicator
@@ -79,15 +80,13 @@ func (t *NodesTab) Update(msg tea.Msg) (*NodesTab, tea.Cmd) {
 		}
 
 	case NodeTestResultMsg:
-		// Update node with test result
 		t.updateNodeResult(msg.Result)
+		return t, waitForResult(t.resultCh)
 
-	case TestAllResultsMsg:
-		// Update all nodes with test results
-		for _, result := range msg.Results {
-			t.updateNodeResult(result)
-		}
+	case TestCompleteMsg:
 		t.testing = false
+		t.resultCh = nil
+		return t, nil
 
 	case NodesRefreshedMsg:
 		t.nodes = msg.Nodes
@@ -383,6 +382,16 @@ func (t *NodesTab) SetSlotTraffic(traffic map[string]string) {
 // TestCompleteMsg is sent when all tests are done
 type TestCompleteMsg struct{}
 
+func waitForResult(ch <-chan node.TestResult) tea.Cmd {
+	return func() tea.Msg {
+		result, ok := <-ch
+		if !ok {
+			return TestCompleteMsg{}
+		}
+		return NodeTestResultMsg{Result: result}
+	}
+}
+
 func (t *NodesTab) testAllNodes() tea.Cmd {
 	if t.testing {
 		return nil
@@ -392,28 +401,15 @@ func (t *NodesTab) testAllNodes() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancelTest = cancel
 
-	// Start testing in background and return commands for each result
-	return func() tea.Msg {
-		resultCh := make(chan node.TestResult, len(t.nodes))
+	ch := make(chan node.TestResult, len(t.nodes))
+	t.resultCh = ch
 
-		go func() {
-			t.nodeManager.TestNodes(ctx, t.nodes, resultCh)
-			close(resultCh)
-		}()
+	go func() {
+		t.nodeManager.TestNodes(ctx, t.nodes, ch)
+		close(ch)
+	}()
 
-		// Collect all results and return them
-		var results []node.TestResult
-		for result := range resultCh {
-			results = append(results, result)
-		}
-
-		return TestAllResultsMsg{Results: results}
-	}
-}
-
-// TestAllResultsMsg contains all test results
-type TestAllResultsMsg struct {
-	Results []node.TestResult
+	return waitForResult(ch)
 }
 
 func (t *NodesTab) updateNodeResult(result node.TestResult) {

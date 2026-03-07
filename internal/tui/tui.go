@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -363,6 +364,15 @@ func inferSubscriptionAndNode(subMgr *subscription.Manager, lock *proxy.LockFile
 	return matchedSubID, matchedNode
 }
 
+func sortSubscriptionsByNameAndID(subs []*subscription.Subscription) {
+	sort.Slice(subs, func(i, j int) bool {
+		if subs[i].Name == subs[j].Name {
+			return subs[i].ID < subs[j].ID
+		}
+		return subs[i].Name < subs[j].Name
+	})
+}
+
 func findNodeInSubscription(sub *subscription.Subscription, lock *proxy.LockFile) *subscription.Node {
 	if sub == nil || lock == nil {
 		return nil
@@ -507,25 +517,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh nodes when subscriptions are updated
 		m.logsTab.AddLog("info", "Subscriptions updated")
 		cmds = append(cmds, m.nodesTab.Init())
-
-	case tabs.SubscriptionSelectedMsg:
-		if msg.ID != "" && msg.ID != m.activeSubID {
-			// Switching subscription does NOT disconnect running slots.
-			// Slots from other subscriptions keep running independently.
-			m.selectedNode = nil
-			m.nodeMgr.Select(nil)
-			m.statusBar.SetSelectedNode(nil)
-		}
-
-		m.activeSubID = msg.ID
-		cmds = append(cmds, m.persistActiveSubscription(m.activeSubID))
-		if m.subsTab != nil {
-			m.subsTab.SetActiveSubscription(m.activeSubID)
-		}
-		if m.nodesTab != nil {
-			m.nodesTab.SetSubscriptionID(m.activeSubID)
-			cmds = append(cmds, m.nodesTab.Init())
-		}
 
 	case tabs.NodesRefreshedMsg:
 		// Always forward NodesRefreshedMsg to nodes tab regardless of active tab
@@ -773,15 +764,16 @@ func (m *Model) renderTabBar() string {
 	return styles.TabBar.Width(m.width).Render(tabBar)
 }
 
-// renderSubTabs renders subscription sub-tabs for the Nodes page
+// renderSubTabs renders subscription sub-tabs for the Nodes page.
+// It performs horizontal scrolling so the tab bar always fits in one line.
 func (m *Model) renderSubTabs() string {
 	subs := m.subManager.List()
+	sortSubscriptionsByNameAndID(subs)
 	if len(subs) == 0 {
 		return ""
 	}
 
-	var subTabs []string
-	// Find the index of the currently active subscription by ID (more reliable than subTabIdx)
+	// Find the index of the currently active subscription by ID
 	activeIdx := 0
 	if m.activeSubID != "" {
 		for i, sub := range subs {
@@ -792,39 +784,115 @@ func (m *Model) renderSubTabs() string {
 		}
 	}
 
+	// Pre-render every tab label so we can measure widths.
+	type renderedTab struct {
+		text  string
+		width int
+	}
+	rendered := make([]renderedTab, 0, len(subs))
 	for i, sub := range subs {
 		if sub == nil {
 			continue
 		}
-		// Check if this subscription has active slots
-		hasActiveSlots := false
-		for _, s := range m.slotMgr.ActiveSlots() {
-			if s.SubID == sub.ID {
-				hasActiveSlots = true
-				break
-			}
-		}
-
+		label := sub.Name
+		var text string
 		if i == activeIdx {
-			label := sub.Name
-			if hasActiveSlots {
-				label = "● " + label
-			}
-			subTabs = append(subTabs, styles.ActiveTab.Render(label))
+			text = styles.ActiveTab.Render(label)
 		} else {
-			label := sub.Name
-			if hasActiveSlots {
-				label = "● " + label
-			}
-			subTabs = append(subTabs, styles.InactiveTab.Render(label))
+			text = styles.InactiveTab.Render(label)
 		}
+		rendered = append(rendered, renderedTab{text: text, width: lipgloss.Width(text)})
 	}
 
-	if len(subTabs) == 0 {
+	if len(rendered) == 0 {
 		return ""
 	}
 
-	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, subTabs...)
+	// Available width for tabs (reserve space for possible ← / → indicators).
+	const arrowWidth = 2 // "← " or " →"
+	maxWidth := m.width
+	if maxWidth < 1 {
+		maxWidth = 80
+	}
+
+	// Determine the visible window of tabs that fits within maxWidth,
+	// ensuring the active tab is always visible.
+	// Map activeIdx to the rendered slice index (skip nil subs).
+	activeRendered := 0
+	{
+		j := 0
+		for i, sub := range subs {
+			if sub == nil {
+				continue
+			}
+			if i == activeIdx {
+				activeRendered = j
+				break
+			}
+			j++
+		}
+	}
+
+	// Start with the active tab and expand outward.
+	startIdx := activeRendered
+	endIdx := activeRendered // inclusive
+	usedWidth := rendered[activeRendered].width
+
+	for {
+		expanded := false
+		// Try expanding left
+		if startIdx > 0 {
+			need := rendered[startIdx-1].width
+			extra := 0
+			if startIdx-1 > 0 {
+				extra = arrowWidth // will need "← " indicator
+			}
+			if endIdx < len(rendered)-1 {
+				extra = max(extra, arrowWidth) // already have " →"
+			}
+			if usedWidth+need+extra <= maxWidth {
+				startIdx--
+				usedWidth += need
+				expanded = true
+			}
+		}
+		// Try expanding right
+		if endIdx < len(rendered)-1 {
+			need := rendered[endIdx+1].width
+			extra := 0
+			if endIdx+1 < len(rendered)-1 {
+				extra = arrowWidth
+			}
+			if startIdx > 0 {
+				extra = max(extra, arrowWidth)
+			}
+			if usedWidth+need+extra <= maxWidth {
+				endIdx++
+				usedWidth += need
+				expanded = true
+			}
+		}
+		if !expanded {
+			break
+		}
+	}
+
+	// Build the visible tab bar.
+	msgs := i18n.M()
+	prefix := styles.HelpText.Render(msgs.Actions.LrSwitch + "： ")
+	var parts []string
+	parts = append(parts, prefix)
+	if startIdx > 0 {
+		parts = append(parts, styles.Muted.Render("◀ "))
+	}
+	for i := startIdx; i <= endIdx; i++ {
+		parts = append(parts, rendered[i].text)
+	}
+	if endIdx < len(rendered)-1 {
+		parts = append(parts, styles.Muted.Render(" ▶"))
+	}
+
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 	return styles.TabBar.Width(m.width).Render(tabBar)
 }
 
@@ -1170,12 +1238,21 @@ func (m *Model) switchSubscription(delta int) tea.Cmd {
 		return nil
 	}
 
-	currentIdx := -1
-	for i, sub := range subs {
-		if sub != nil && sub.ID == m.activeSubID {
-			currentIdx = i
-			break
+	sortSubscriptionsByNameAndID(subs)
+
+	currentIdx := m.subTabIdx
+	if currentIdx < 0 || currentIdx >= len(subs) || subs[currentIdx] == nil || subs[currentIdx].ID != m.activeSubID {
+		currentIdx = -1
+		for i, sub := range subs {
+			if sub != nil && sub.ID == m.activeSubID {
+				currentIdx = i
+				break
+			}
 		}
+	}
+
+	if currentIdx < 0 {
+		currentIdx = 0
 	}
 
 	nextIdx := (currentIdx + delta + len(subs)) % len(subs)

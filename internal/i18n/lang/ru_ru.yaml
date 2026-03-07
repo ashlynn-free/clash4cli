@@ -40,6 +40,8 @@ subscription:
   input_content: "Вставьте содержимое подписки:"
 
 settings:
+  mixed_port_label: "Смешанный порт (SOCKS5 + HTTP)"
+  mixed_port_help: "Это базовый порт. Остальные локальные порты назначаются последовательно относительно него (+1, +2, ...)."
   socks_port: "Порт SOCKS5"
   http_port: "Порт HTTP"
   allow_lan: "Разрешить подключения LAN"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter — выбрать"
   tab: "Tab — переключить"
   arrows: "↑↓ — навигация"
+  lr_switch: "←→ переключить"
 
 errors:
   load_config: "Не удалось загрузить конфигурацию"

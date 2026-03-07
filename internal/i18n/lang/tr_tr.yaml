@@ -40,6 +40,8 @@ subscription:
   input_content: "Abonelik içeriğini yapıştırın:"
 
 settings:
+  mixed_port_label: "Karma port (SOCKS5 + HTTP)"
+  mixed_port_help: "Bu temel porttur. Diğer yerel portlar bu porttan başlayarak sıralı şekilde atanır (+1, +2, ...)."
   socks_port: "SOCKS5 Portu"
   http_port: "HTTP Portu"
   allow_lan: "LAN bağlantılarına izin ver"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter ile seç"
   tab: "Tab ile değiştir"
   arrows: "↑↓ ile gezin"
+  lr_switch: "←→ değiştir"
 
 errors:
   load_config: "Yapılandırma yüklenemedi"

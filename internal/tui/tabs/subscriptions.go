@@ -24,14 +24,7 @@ type SubscriptionAddedMsg struct {
 type SubscriptionUpdatedMsg struct {
 	IDs      []string
 	Name     string
-	Added    int
-	Removed  int
 	ViaProxy bool
-}
-
-// SubscriptionSelectedMsg is sent when user selects an active subscription
-type SubscriptionSelectedMsg struct {
-	ID string
 }
 
 // SubscriptionErrorMsg is sent when an error occurs
@@ -73,11 +66,9 @@ type SubscriptionsTab struct {
 // NewSubscriptionsTab creates a new subscriptions tab
 func NewSubscriptionsTab(subMgr *subscription.Manager) *SubscriptionsTab {
 	columns := []components.Column{
-		{Title: "", Width: 3},
-		{Title: "Name", Width: 22},
+		{Title: "Name", Width: 25},
 		{Title: "Nodes", Width: 8},
 		{Title: "Last", Width: 14},
-		{Title: "Δ", Width: 8},
 		{Title: "URL", Width: 36},
 	}
 
@@ -122,8 +113,6 @@ func (t *SubscriptionsTab) Update(msg tea.Msg) (*SubscriptionsTab, tea.Cmd) {
 			t.table.MoveUp()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
 			t.table.MoveDown()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			return t, t.selectSubscription()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 			t.inputMode = InputModeURL
 			t.urlInput.Focus()
@@ -157,7 +146,7 @@ func (t *SubscriptionsTab) Update(msg tea.Msg) (*SubscriptionsTab, tea.Cmd) {
 			suffix = " via proxy"
 		}
 		if msg.Name != "" {
-			t.message = fmt.Sprintf("%s: %s (+%d -%d)%s", i18n.M().Subscription.Update, msg.Name, msg.Added, msg.Removed, suffix)
+			t.message = fmt.Sprintf("%s: %s%s", i18n.M().Subscription.Update, msg.Name, suffix)
 		} else {
 			t.message = i18n.M().Subscription.Update + " complete" + suffix
 		}
@@ -269,7 +258,6 @@ func (t *SubscriptionsTab) View() string {
 
 	// Help
 	help := "\n" +
-		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" select  ") +
 		styles.HelpKey.Render("a") + styles.HelpText.Render(" add  ") +
 		styles.HelpKey.Render("z") + styles.HelpText.Render(" paste  ") +
 		styles.HelpKey.Render("d") + styles.HelpText.Render(" delete  ") +
@@ -336,22 +324,28 @@ func (t *SubscriptionsTab) resetInputs() {
 func (t *SubscriptionsTab) refreshSubs() tea.Cmd {
 	return func() tea.Msg {
 		subs := t.subManager.List()
-		sort.Slice(subs, func(i, j int) bool {
-			if subs[i].Name == subs[j].Name {
-				return subs[i].ID < subs[j].ID
-			}
-			return subs[i].Name < subs[j].Name
-		})
+		sortSubscriptionsByNameAndID(subs)
 		return SubsRefreshedMsg{Subs: subs}
 	}
 }
 
+func sortSubscriptionsByNameAndID(subs []*subscription.Subscription) {
+	sort.Slice(subs, func(i, j int) bool {
+		if subs[i].Name == subs[j].Name {
+			return subs[i].ID < subs[j].ID
+		}
+		return subs[i].Name < subs[j].Name
+	})
+}
+
 func (t *SubscriptionsTab) updateTableRows() {
+	prevIdx := t.table.Selected()
 	rows := make([][]string, len(t.subs))
+	activeIdx := -1
+
 	for i, sub := range t.subs {
-		icon := ""
-		if t.activeSubID != "" && sub.ID == t.activeSubID {
-			icon = "✅"
+		if sub != nil && sub.ID == t.activeSubID {
+			activeIdx = i
 		}
 
 		last := "-"
@@ -367,11 +361,6 @@ func (t *SubscriptionsTab) updateTableRows() {
 			last = sub.UpdatedAt.Format("01-02 15:04")
 		}
 
-		delta := ""
-		if !sub.LastUpdateAttemptAt.IsZero() && sub.LastUpdateError == "" {
-			delta = fmt.Sprintf("+%d -%d", sub.LastUpdateAdded, sub.LastUpdateRemoved)
-		}
-
 		url := sub.URL
 		if url == "" && sub.Source == "manual" {
 			url = "<manual>"
@@ -381,31 +370,30 @@ func (t *SubscriptionsTab) updateTableRows() {
 		}
 
 		rows[i] = []string{
-			icon,
 			sub.Name,
 			fmt.Sprintf("%d", len(sub.Nodes)),
 			last,
-			delta,
 			url,
 		}
 	}
+
 	t.table.SetRows(rows)
+	if activeIdx >= 0 {
+		t.table.SetSelected(activeIdx)
+		return
+	}
+	if prevIdx >= 0 && prevIdx < len(rows) {
+		t.table.SetSelected(prevIdx)
+		return
+	}
+	if len(rows) > 0 {
+		t.table.SetSelected(0)
+	}
 }
 
 func (t *SubscriptionsTab) SetActiveSubscription(id string) {
 	t.activeSubID = id
 	t.updateTableRows()
-}
-
-func (t *SubscriptionsTab) selectSubscription() tea.Cmd {
-	idx := t.table.Selected()
-	if idx >= 0 && idx < len(t.subs) {
-		sub := t.subs[idx]
-		return func() tea.Msg {
-			return SubscriptionSelectedMsg{ID: sub.ID}
-		}
-	}
-	return nil
 }
 
 func (t *SubscriptionsTab) addSubscription(name, url string) tea.Cmd {
@@ -454,19 +442,13 @@ func (t *SubscriptionsTab) updateSelected() tea.Cmd {
 				return SubscriptionErrorMsg{Error: err}
 			}
 			updated, _ := t.subManager.Get(sub.ID)
-			added := 0
-			removed := 0
 			viaProxy := false
 			if updated != nil {
-				added = updated.LastUpdateAdded
-				removed = updated.LastUpdateRemoved
 				viaProxy = updated.LastUpdateViaProxy
 			}
 			return SubscriptionUpdatedMsg{
 				IDs:      []string{sub.ID},
 				Name:     sub.Name,
-				Added:    added,
-				Removed:  removed,
 				ViaProxy: viaProxy,
 			}
 		}

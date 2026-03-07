@@ -74,9 +74,6 @@ func TestManager_Add_Load_Update_URL(t *testing.T) {
 	if sub.LastUpdateError != "" {
 		t.Fatalf("expected LastUpdateError to be empty, got %q", sub.LastUpdateError)
 	}
-	if sub.LastUpdateAdded != 1 || sub.LastUpdateRemoved != 0 {
-		t.Fatalf("expected LastUpdateAdded/Removed=1/0, got %d/%d", sub.LastUpdateAdded, sub.LastUpdateRemoved)
-	}
 
 	before := sub.UpdatedAt
 	beforeAttempt := sub.LastUpdateAttemptAt
@@ -97,11 +94,11 @@ func TestManager_Add_Load_Update_URL(t *testing.T) {
 	if got.LastUpdateError != "" {
 		t.Fatalf("expected LastUpdateError to be empty, got %q", got.LastUpdateError)
 	}
-	if got.LastUpdateAdded != 1 || got.LastUpdateRemoved != 0 {
-		t.Fatalf("expected LastUpdateAdded/Removed=1/0 after update, got %d/%d", got.LastUpdateAdded, got.LastUpdateRemoved)
-	}
 	if len(got.Nodes) != 2 {
 		t.Fatalf("expected 2 nodes after update, got %d", len(got.Nodes))
+	}
+	if got.Nodes[0].Name != "N1" || got.Nodes[1].Name != "N2" {
+		t.Fatalf("expected refreshed node names [N1 N2], got [%s %s]", got.Nodes[0].Name, got.Nodes[1].Name)
 	}
 
 	// Reload from disk should include updated nodes.
@@ -115,6 +112,9 @@ func TestManager_Add_Load_Update_URL(t *testing.T) {
 	}
 	if len(got2.Nodes) != 2 {
 		t.Fatalf("expected 2 nodes after reload, got %d", len(got2.Nodes))
+	}
+	if got2.Nodes[0].Name != "N1" || got2.Nodes[1].Name != "N2" {
+		t.Fatalf("expected persisted node names [N1 N2], got [%s %s]", got2.Nodes[0].Name, got2.Nodes[1].Name)
 	}
 	if got2.LastUpdateAttemptAt.IsZero() {
 		t.Fatalf("expected LastUpdateAttemptAt to be persisted")
@@ -175,9 +175,6 @@ func TestManager_Update_PersistsFailureWithoutOverwritingNodes(t *testing.T) {
 	}
 	if got.LastUpdateError == "" {
 		t.Fatalf("expected LastUpdateError to be set on failure")
-	}
-	if got.LastUpdateAdded != 0 || got.LastUpdateRemoved != 0 {
-		t.Fatalf("expected LastUpdateAdded/Removed=0/0 on failure, got %d/%d", got.LastUpdateAdded, got.LastUpdateRemoved)
 	}
 	if len(got.Nodes) != beforeNodes {
 		t.Fatalf("expected nodes to remain unchanged on failure, got %d want %d", len(got.Nodes), beforeNodes)
@@ -297,6 +294,9 @@ func TestManager_AddManual_Load_Update(t *testing.T) {
 	}
 	if len(got2.Nodes) != 2 {
 		t.Fatalf("expected 2 nodes after manual update, got %d", len(got2.Nodes))
+	}
+	if got2.Nodes[0].Name != "N1" || got2.Nodes[1].Name != "N2" {
+		t.Fatalf("expected manual refresh node names [N1 N2], got [%s %s]", got2.Nodes[0].Name, got2.Nodes[1].Name)
 	}
 }
 

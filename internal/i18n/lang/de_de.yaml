@@ -40,6 +40,8 @@ subscription:
   input_content: "Abo-Inhalt einfügen:"
 
 settings:
+  mixed_port_label: "Gemischter Port (SOCKS5 + HTTP)"
+  mixed_port_help: "Dies ist der Basis-Port. Andere lokale Ports werden von diesem Port aus fortlaufend vergeben (+1, +2, ...)."
   socks_port: "SOCKS5 Port"
   http_port: "HTTP Port"
   allow_lan: "LAN-Verbindungen erlauben"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter zum Auswählen"
   tab: "Tab zum Wechseln"
   arrows: "↑↓ zum Navigieren"
+  lr_switch: "←→ Wechseln"
 
 errors:
   load_config: "Konfiguration konnte nicht geladen werden"

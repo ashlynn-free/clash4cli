@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ var (
 var (
 	quietMode     = false
 	specifiedPort = 0
+	specifiedSlot = -1 // -1 means auto-detect (first active slot)
 	runMode       = "auto" // auto|proxychains|env
 )
 
@@ -57,6 +59,18 @@ func main() {
 				os.Exit(1)
 			}
 			args = args[2:]
+		case "-s", "--slot":
+			if len(args) < 2 {
+				fmt.Fprintf(os.Stderr, "Error: --slot requires a value (0-9)\n")
+				os.Exit(1)
+			}
+			s, err := strconv.Atoi(args[1])
+			if err != nil || s < 0 || s > 9 {
+				fmt.Fprintf(os.Stderr, "Error: invalid slot number: %s (expected 0-9)\n", args[1])
+				os.Exit(1)
+			}
+			specifiedSlot = s
+			args = args[2:]
 		case "--port":
 			if len(args) < 2 {
 				fmt.Fprintf(os.Stderr, "Error: --port requires a value\n")
@@ -76,8 +90,8 @@ func main() {
 
 runCommand:
 	if len(args) == 0 {
-		printUsage()
-		os.Exit(1)
+		listSlots()
+		return
 	}
 
 	port := specifiedPort
@@ -85,20 +99,49 @@ runCommand:
 
 	// If no port specified, read from lock file
 	if port == 0 {
-		lockFile, err := proxy.ReadLockFile()
-		if err != nil {
+		mlf, err := proxy.ReadMultiLockFile()
+		if err != nil || mlf == nil || len(mlf.Instances) == 0 {
 			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Cannot read proxy.lock file\033[0m\n")
 			fmt.Fprintf(os.Stderr, "        c4c proxy is not running or lock file is missing.\n")
 			fmt.Fprintf(os.Stderr, "        Please start c4c and select a node first.\n")
 			os.Exit(1)
 		}
+
+		var lockFile proxy.LockFile
+		var slotID int
+
+		if specifiedSlot >= 0 {
+			// User specified a slot
+			lf, ok := mlf.Instances[specifiedSlot]
+			if !ok {
+				fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Slot %d is not active\033[0m\n", specifiedSlot)
+				fmt.Fprintf(os.Stderr, "        Run 'c4cgo' with no arguments to see active slots.\n")
+				os.Exit(1)
+			}
+			lockFile = lf
+			slotID = specifiedSlot
+		} else {
+			// Auto-detect: use the lowest-numbered active slot
+			ids := make([]int, 0, len(mlf.Instances))
+			for id := range mlf.Instances {
+				ids = append(ids, id)
+			}
+			sort.Ints(ids)
+			slotID = ids[0]
+			lockFile = mlf.Instances[slotID]
+		}
+
 		port = lockFile.Port
 		if lockFile.ProxyHost != "" {
 			proxyHost = lockFile.ProxyHost
 		}
 
 		if !quietMode {
-			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Using proxy at %s:%d (node: %s)\033[0m\n", proxyHost, port, lockFile.Node)
+			slotInfo := ""
+			if len(mlf.Instances) > 1 || specifiedSlot >= 0 {
+				slotInfo = fmt.Sprintf(" slot:%d", slotID)
+			}
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Using proxy at %s:%d (node: %s%s)\033[0m\n", proxyHost, port, lockFile.Node, slotInfo)
 		}
 	}
 
@@ -187,7 +230,10 @@ func printUsage() {
 
 Usage: c4cgo [options] command [args...]
 
+Running c4cgo with no arguments shows all proxy slots and their status.
+
 Options:
+  -s, --slot N   Use proxy from slot N (0-9, default: first active slot)
   --port PORT    Specify proxy port (default: read from ~/.clash4cli/proxy.lock)
   --mode MODE    Run mode: auto|proxychains|env (default: auto)
   -q, --quiet    Suppress status messages (only show command output)
@@ -195,7 +241,9 @@ Options:
   -h, --help     Show this help
 
 Examples:
+  c4cgo                                              Show active proxy slots
   c4cgo curl https://www.google.com
+  c4cgo -s 0 curl https://ip.sb
   c4cgo --port 17890 wget https://example.com/file.zip
   c4cgo --mode env curl https://ip.sb
   c4cgo git clone https://github.com/user/repo.git
@@ -203,6 +251,47 @@ Examples:
 
 Note: Make sure c4c is running and a node is selected.
 `, Version)
+}
+
+func listSlots() {
+	mlf, err := proxy.ReadMultiLockFile()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Cannot read proxy.lock file: %v\033[0m\n", err)
+		os.Exit(1)
+	}
+	if mlf == nil || len(mlf.Instances) == 0 {
+		fmt.Println("No active slots. Start c4c and select a node first.")
+		return
+	}
+
+	// Collect and sort active slot IDs
+	ids := make([]int, 0, len(mlf.Instances))
+	for id := range mlf.Instances {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+
+	// Print all slots 0-9, marking active ones
+	activeSet := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		activeSet[id] = true
+	}
+
+	for i := 0; i < 10; i++ {
+		if lf, ok := mlf.Instances[i]; ok && activeSet[i] {
+			node := lf.Node
+			if node == "" {
+				node = "-"
+			}
+			subID := lf.SubID
+			if subID == "" {
+				subID = "-"
+			}
+			fmt.Printf("  Slot %d  \033[32m●\033[0m running  port:%-6d node:%-20s sub:%s\n", i, lf.Port, node, subID)
+		} else {
+			fmt.Printf("  Slot %d  \033[90m○\033[0m empty\n", i)
+		}
+	}
 }
 
 func verifyProxy(host string, port int) bool {

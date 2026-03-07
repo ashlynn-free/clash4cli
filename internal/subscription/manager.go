@@ -168,8 +168,6 @@ func (m *Manager) Add(name, url string) (*Subscription, error) {
 		Nodes:               nodes,
 		LastUpdateAttemptAt: attemptAt,
 		LastUpdateError:     lastErr,
-		LastUpdateAdded:     len(nodes),
-		LastUpdateRemoved:   0,
 		LastUpdateViaProxy:  viaProxy,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -220,8 +218,6 @@ func (m *Manager) AddManual(name, content string) (*Subscription, error) {
 		Content:             content,
 		Nodes:               nodes,
 		LastUpdateAttemptAt: attemptAt,
-		LastUpdateAdded:     len(nodes),
-		LastUpdateRemoved:   0,
 		LastUpdateViaProxy:  false,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
@@ -249,8 +245,6 @@ func (m *Manager) Update(id string) error {
 	source := sub.Source
 	url := sub.URL
 	content := sub.Content
-	prevNodes := make([]Node, len(sub.Nodes))
-	copy(prevNodes, sub.Nodes)
 	useProxy := m.updateViaProxy
 	provider := m.proxyProvider
 	m.mu.RUnlock()
@@ -312,15 +306,11 @@ func (m *Manager) Update(id string) error {
 		sub.Source = source
 		sub.LastUpdateAttemptAt = attemptAt
 		sub.LastUpdateError = err.Error()
-		sub.LastUpdateAdded = 0
-		sub.LastUpdateRemoved = 0
 		sub.LastUpdateViaProxy = viaProxy
 		m.mu.Unlock()
 		_ = m.saveSub(sub)
 		return err
 	}
-
-	added, removed := diffNodeCounts(prevNodes, nodes)
 
 	// Re-check and update while holding lock
 	m.mu.Lock()
@@ -333,8 +323,6 @@ func (m *Manager) Update(id string) error {
 	sub.Nodes = nodes
 	sub.LastUpdateAttemptAt = attemptAt
 	sub.LastUpdateError = ""
-	sub.LastUpdateAdded = added
-	sub.LastUpdateRemoved = removed
 	sub.LastUpdateViaProxy = viaProxy
 	sub.UpdatedAt = time.Now()
 	m.mu.Unlock()
@@ -544,34 +532,4 @@ func randomID(nBytes int) (string, error) {
 		return "", fmt.Errorf("failed to generate id: %w", err)
 	}
 	return hex.EncodeToString(b), nil
-}
-
-func diffNodeCounts(prev, next []Node) (added, removed int) {
-	prevCounts := make(map[string]int, len(prev))
-	for i := range prev {
-		prevCounts[nodeIdentityKey(prev[i])]++
-	}
-
-	nextCounts := make(map[string]int, len(next))
-	for i := range next {
-		nextCounts[nodeIdentityKey(next[i])]++
-	}
-
-	for k, n := range nextCounts {
-		if n > prevCounts[k] {
-			added += n - prevCounts[k]
-		}
-	}
-	for k, n := range prevCounts {
-		if n > nextCounts[k] {
-			removed += n - nextCounts[k]
-		}
-	}
-	return added, removed
-}
-
-func nodeIdentityKey(n Node) string {
-	// Include name to keep a stable identity from the user's perspective.
-	// Server is case-insensitive for diffing purposes.
-	return fmt.Sprintf("%s|%s|%d|%s", n.Type, strings.ToLower(n.Server), n.Port, n.Name)
 }

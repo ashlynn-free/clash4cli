@@ -40,6 +40,8 @@ subscription:
   input_content: "请粘贴订阅内容："
 
 settings:
+  mixed_port_label: "混合端口（SOCKS5 + HTTP）"
+  mixed_port_help: "这是基准端口，其他本地端口会在此基础上按顺序递增（+1、+2……）。"
   socks_port: "SOCKS5 端口"
   http_port: "HTTP 端口"
   allow_lan: "允许局域网连接"
@@ -79,6 +81,7 @@ actions:
   enter: "回车选择"
   tab: "Tab 切换"
   arrows: "↑↓ 导航"
+  lr_switch: "←→ 切换"
 
 errors:
   load_config: "加载配置失败"

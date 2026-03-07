@@ -40,6 +40,8 @@ subscription:
   input_content: "サブスクリプション内容を貼り付け:"
 
 settings:
+  mixed_port_label: "混合ポート（SOCKS5 + HTTP）"
+  mixed_port_help: "これは基準ポートです。ほかのローカルポートはこのポートを起点に順番に割り当てられます（+1、+2、…）。"
   socks_port: "SOCKS5 ポート"
   http_port: "HTTP ポート"
   allow_lan: "LAN 接続を許可"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter で選択"
   tab: "Tab で切替"
   arrows: "↑↓ で移動"
+  lr_switch: "←→ で切替"
 
 errors:
   load_config: "設定の読み込みに失敗しました"

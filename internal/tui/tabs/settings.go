@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/netctl"
@@ -57,10 +58,12 @@ type SettingsTab struct {
 	messageShow  bool
 	flashID      int
 	flashTicks   int
+	scrollOffset int
 }
 
 type settingField struct {
 	label     string
+	helpText  string
 	fieldType FieldType
 	key       string
 	disabled  bool
@@ -164,7 +167,8 @@ func NewSettingsTab(cfg *config.Config) *SettingsTab {
 
 	fields := []settingField{
 		{
-			label:     "Mixed Port (SOCKS5 + HTTP)",
+			label:     i18n.M().Settings.MixedPortLabel,
+			helpText:  i18n.M().Settings.MixedPortHelp,
 			fieldType: FieldTypeInput,
 			input:     mixedPortInput,
 			key:       "mixed_port",
@@ -454,12 +458,21 @@ func (t *SettingsTab) nextFlashTick() tea.Cmd {
 
 // View renders the tab
 func (t *SettingsTab) View() string {
-	var content string
+	var lines []string
+	// Track the line index where the focused item starts.
+	focusedLine := 0
 
 	for i, field := range t.fields {
 		if field.fieldType == FieldTypeHeader {
-			content += styles.Title.Render(field.label) + "\n\n"
+			if i == t.focusedField {
+				focusedLine = len(lines)
+			}
+			lines = append(lines, styles.Title.Render(field.label), "")
 			continue
+		}
+
+		if i == t.focusedField {
+			focusedLine = len(lines)
 		}
 
 		label := field.label
@@ -471,7 +484,16 @@ func (t *SettingsTab) View() string {
 		if field.disabled {
 			label = styles.Muted.Render("  " + field.label)
 		}
-		content += label + "\n"
+		lines = append(lines, label)
+		if field.helpText != "" {
+			helpText := "    " + field.helpText
+			if field.disabled {
+				helpText = styles.Muted.Render(helpText)
+			} else {
+				helpText = styles.HelpText.Render(helpText)
+			}
+			lines = append(lines, helpText)
+		}
 
 		switch field.fieldType {
 		case FieldTypeInput:
@@ -479,21 +501,22 @@ func (t *SettingsTab) View() string {
 			if i == t.focusedField {
 				inputStyle = styles.InputFocused
 			}
-			content += inputStyle.Render(field.input.View()) + "\n\n"
+			lines = append(lines, inputStyle.Render(field.input.View()), "")
 
 		case FieldTypeSelect:
-			content += t.renderSelect(field, i == t.focusedField) + "\n\n"
+			lines = append(lines, t.renderSelect(field, i == t.focusedField), "")
 		}
 	}
 
 	// Save button
 	saveLabel := i18n.M().Settings.Save
 	if t.focusedField == len(t.fields) {
+		focusedLine = len(lines)
 		saveLabel = styles.StatusConnected.Render("▶ [" + saveLabel + "]")
 	} else {
 		saveLabel = styles.Muted.Render("  [" + saveLabel + "]")
 	}
-	content += saveLabel + "\n"
+	lines = append(lines, saveLabel)
 
 	// Restart core button
 	restartLabel := i18n.M().Settings.RestartCore
@@ -501,29 +524,89 @@ func (t *SettingsTab) View() string {
 		restartLabel = "Restart core"
 	}
 	if t.focusedField == len(t.fields)+1 {
+		focusedLine = len(lines)
 		restartLabel = styles.StatusConnected.Render("▶ [" + restartLabel + "]")
 	} else {
 		restartLabel = styles.Muted.Render("  [" + restartLabel + "]")
 	}
-	content += restartLabel + "\n"
+	lines = append(lines, restartLabel)
 
 	// Message
 	if t.message != "" && t.messageShow {
 		if t.messageType == "success" {
-			content += "\n" + styles.SuccessMessage.Render(t.message)
+			lines = append(lines, "", styles.SuccessMessage.Render(t.message))
 		} else {
-			content += "\n" + styles.ErrorMessage.Render(t.message)
+			lines = append(lines, "", styles.ErrorMessage.Render(t.message))
 		}
 	}
 
-	// Help
-	help := "\n\n" +
-		styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" navigate  ") +
+	// Help (always shown at bottom, outside scrollable area)
+	help := styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" navigate  ") +
 		styles.HelpKey.Render("←/→") + styles.HelpText.Render(" select  ") +
 		styles.HelpKey.Render("Ctrl+S") + styles.HelpText.Render(" save  ") +
 		styles.HelpKey.Render("Ctrl+R") + styles.HelpText.Render(" restart")
 
-	return styles.ContentArea.Render(content + help)
+	// Reserve lines for fixed bottom area: help text (1 line).
+	// When scrolling, also reserve 1 line for the scroll indicator.
+	needsScroll := t.height > 0 && len(lines) > t.height-1
+	reservedBottom := 1 // help line
+	if needsScroll {
+		reservedBottom = 2 // scroll indicator + help line
+	}
+	visibleHeight := t.height - reservedBottom
+
+	// If height hasn't been set or all content fits, show everything without scrolling.
+	if visibleHeight <= 0 || len(lines) <= visibleHeight {
+		content := strings.Join(lines, "\n")
+		content += "\n" + help
+		rendered := styles.ContentArea.Render(content)
+		if t.height > 0 {
+			return lipgloss.NewStyle().Height(t.height).Render(rendered)
+		}
+		return rendered
+	}
+
+	// Adjust scroll offset to keep focused item visible
+	if focusedLine < t.scrollOffset {
+		t.scrollOffset = focusedLine
+	}
+	if focusedLine >= t.scrollOffset+visibleHeight {
+		t.scrollOffset = focusedLine - visibleHeight + 1
+	}
+	if t.scrollOffset < 0 {
+		t.scrollOffset = 0
+	}
+	maxOffset := len(lines) - visibleHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if t.scrollOffset > maxOffset {
+		t.scrollOffset = maxOffset
+	}
+
+	// Slice visible window
+	start := t.scrollOffset
+	end := t.scrollOffset + visibleHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	visible := lines[start:end]
+
+	content := strings.Join(visible, "\n")
+
+	// Scroll indicator (like Table component)
+	scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
+	scrollInfo := lipgloss.NewStyle().
+		Foreground(styles.MutedColor).
+		Width(t.width).
+		Align(lipgloss.Right).
+		Render(scrollText)
+	content += "\n" + scrollInfo
+	content += "\n" + help
+
+	return lipgloss.NewStyle().Height(t.height).Render(
+		styles.ContentArea.Render(content),
+	)
 }
 
 func (t *SettingsTab) renderSelect(field settingField, focused bool) string {

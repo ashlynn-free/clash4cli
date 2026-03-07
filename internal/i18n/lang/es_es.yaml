@@ -40,6 +40,8 @@ subscription:
   input_content: "Pega el contenido de la suscripción:"
 
 settings:
+  mixed_port_label: "Puerto mixto (SOCKS5 + HTTP)"
+  mixed_port_help: "Este es el puerto base. Los demás puertos locales se asignan secuencialmente a partir de este (+1, +2, ...)."
   socks_port: "Puerto SOCKS5"
   http_port: "Puerto HTTP"
   allow_lan: "Permitir conexiones LAN"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter para seleccionar"
   tab: "Tab para cambiar"
   arrows: "↑↓ para navegar"
+  lr_switch: "←→ cambiar"
 
 errors:
   load_config: "No se pudo cargar la configuración"

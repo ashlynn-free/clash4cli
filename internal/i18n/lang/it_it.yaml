@@ -40,6 +40,8 @@ subscription:
   input_content: "Incolla il contenuto della sottoscrizione:"
 
 settings:
+  mixed_port_label: "Porta mista (SOCKS5 + HTTP)"
+  mixed_port_help: "Questa è la porta base. Le altre porte locali vengono assegnate in sequenza a partire da questa (+1, +2, ...)."
   socks_port: "Porta SOCKS5"
   http_port: "Porta HTTP"
   allow_lan: "Consenti connessioni LAN"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter per selezionare"
   tab: "Tab per cambiare"
   arrows: "↑↓ per navigare"
+  lr_switch: "←→ cambiare"
 
 errors:
   load_config: "Impossibile caricare la configurazione"

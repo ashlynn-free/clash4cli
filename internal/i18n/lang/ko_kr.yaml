@@ -40,6 +40,8 @@ subscription:
   input_content: "구독 내용을 붙여넣기:"
 
 settings:
+  mixed_port_label: "혼합 포트 (SOCKS5 + HTTP)"
+  mixed_port_help: "이 포트는 기준 포트입니다. 다른 로컬 포트는 이 포트를 기준으로 순차적으로 할당됩니다(+1, +2, ...)."
   socks_port: "SOCKS5 포트"
   http_port: "HTTP 포트"
   allow_lan: "LAN 연결 허용"
@@ -78,6 +80,7 @@ actions:
   enter: "Enter로 선택"
   tab: "Tab으로 전환"
   arrows: "↑↓ 이동"
+  lr_switch: "←→ 전환"
 
 errors:
   load_config: "설정을 불러오지 못했습니다"
