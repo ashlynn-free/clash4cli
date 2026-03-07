@@ -337,6 +337,11 @@ func (sm *SlotManager) SyncFromLockFile() {
 		if !tmpCtrl.lockFileLooksAlive(&lock) {
 			logger.Warn("Slot %d lock entry not alive (pid=%d, port=%d, host=%s): skipping",
 				slotID, lock.PID, lock.Port, lock.ProxyHost)
+			// Try to kill stale process by PID if it's still around
+			if lock.PID > 0 && isProcessAlive(lock.PID) {
+				_ = terminateProcess(lock.PID, 2*time.Second)
+				logger.Info("Killed stale process PID %d for slot %d", lock.PID, slotID)
+			}
 			continue
 		}
 
@@ -377,6 +382,9 @@ func (sm *SlotManager) SyncFromLockFile() {
 
 		go sm.forwardLogs(slotID, sc)
 	}
+
+	// Rewrite lock file to remove dead entries
+	sm.writeLockFileLocked()
 }
 
 // Slot0Port returns slot 0's port if running, or the configured default.
@@ -408,6 +416,7 @@ func (sm *SlotManager) cleanSlotLocked(slotID int) {
 	sm.slotModes[slotID] = ""
 	sm.slotNodes[slotID] = ""
 	sm.slotSubIDs[slotID] = ""
+	sm.slotHistory[slotID] = nil
 }
 
 func (sm *SlotManager) collectForbiddenPortsLocked() map[int]struct{} {

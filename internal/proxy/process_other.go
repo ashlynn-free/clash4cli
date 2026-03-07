@@ -16,4 +16,6 @@ func terminateProcess(pid int, timeout time.Duration) error {
 	return fmt.Errorf("terminateProcess unsupported on this platform")
 }
 
+func killStaleProcessOnPort(port int) bool { return false }
+
 func processLooksLikeMihomo(pid int, configPath string) bool { return false }

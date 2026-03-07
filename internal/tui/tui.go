@@ -921,7 +921,7 @@ func (m *Model) nextTab() {
 	// Discard unsaved settings when leaving Settings tab.
 	if m.activeTab == TabSettings && m.settingsTab != nil && m.cfg != nil {
 		m.settingsTab = tabs.NewSettingsTab(m.cfg)
-		m.settingsTab.SetSize(m.width, m.height-4)
+		m.settingsTab.SetSize(m.width, m.height-3)
 	}
 	m.activeTab = Tab((int(m.activeTab) + 1) % 4)
 }
@@ -930,7 +930,7 @@ func (m *Model) prevTab() {
 	// Discard unsaved settings when leaving Settings tab.
 	if m.activeTab == TabSettings && m.settingsTab != nil && m.cfg != nil {
 		m.settingsTab = tabs.NewSettingsTab(m.cfg)
-		m.settingsTab.SetSize(m.width, m.height-4)
+		m.settingsTab.SetSize(m.width, m.height-3)
 	}
 	m.activeTab = Tab((int(m.activeTab) + 3) % 4)
 }
@@ -1179,18 +1179,6 @@ func (m *Model) updateSlotIndicators() {
 			indicators[s.NodeName] = tabs.SlotIndicator{
 				SlotID: s.SlotID,
 				Icon:   slotModeIcon(s.Mode),
-			}
-		}
-	}
-
-	// If no active slots, use historical state (for UI display only)
-	if len(indicators) == 0 && m.cfg != nil && len(m.cfg.UI.SlotHistory) > 0 {
-		for _, h := range m.cfg.UI.SlotHistory {
-			if h.NodeName != "" && h.Mode != "" {
-				indicators[h.NodeName] = tabs.SlotIndicator{
-					SlotID: h.SlotID,
-					Icon:   slotModeIcon(h.Mode),
-				}
 			}
 		}
 	}

@@ -79,6 +79,38 @@ func readProcessCommandLine(pid int) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// findPIDOnPort uses lsof to find the PID of the process listening on a TCP port.
+// Returns 0 if no process is found or on error.
+func findPIDOnPort(port int) int {
+	out, err := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port)).CombinedOutput()
+	if err != nil || len(out) == 0 {
+		return 0
+	}
+	// lsof may return multiple PIDs; take the first one.
+	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	var pid int
+	if _, err := fmt.Sscanf(line, "%d", &pid); err != nil {
+		return 0
+	}
+	return pid
+}
+
+// killStaleProcessOnPort attempts to kill a stale mihomo process occupying the given port.
+// Returns true if the port was successfully freed.
+func killStaleProcessOnPort(port int) bool {
+	pid := findPIDOnPort(port)
+	if pid <= 0 {
+		return false
+	}
+	if !processLooksLikeMihomo(pid, "") {
+		return false
+	}
+	if err := terminateProcess(pid, 2*time.Second); err != nil {
+		return false
+	}
+	return true
+}
+
 func processLooksLikeMihomo(pid int, configPath string) bool {
 	cmdline, err := readProcessCommandLine(pid)
 	if err != nil || cmdline == "" {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"rocket4cli/internal/proxy"
+	"rocket4cli/internal/subscription"
 )
 
 // Version information (set via ldflags)
@@ -264,6 +265,8 @@ func listSlots() {
 		return
 	}
 
+	subNames := loadSubscriptionNames()
+
 	// Collect and sort active slot IDs
 	ids := make([]int, 0, len(mlf.Instances))
 	for id := range mlf.Instances {
@@ -283,16 +286,39 @@ func listSlots() {
 			if node == "" {
 				node = "-"
 			}
-			subID := lf.SubID
-			if subID == "" {
-				subID = "-"
-			}
-			fmt.Printf("  Slot %d  \033[32m●\033[0m running  port:%-6d node:%-20s sub:%s\n", i, lf.Port, node, subID)
+			subName := subscriptionDisplayName(subNames, lf.SubID)
+			fmt.Printf("  Slot %d  \033[32m●\033[0m running  port:%-6d node:%-20s sub:%s\n", i, lf.Port, node, subName)
 		} else {
 			fmt.Printf("  Slot %d  \033[90m○\033[0m empty\n", i)
 		}
 	}
 }
+
+func loadSubscriptionNames() map[string]string {
+	subNames := make(map[string]string)
+	mgr := subscription.NewManager()
+	if err := mgr.Load(); err != nil {
+		return subNames
+	}
+	for _, sub := range mgr.List() {
+		if sub == nil || sub.ID == "" {
+			continue
+		}
+		subNames[sub.ID] = sub.Name
+	}
+	return subNames
+}
+
+func subscriptionDisplayName(subNames map[string]string, subID string) string {
+	if subID == "" {
+		return "-"
+	}
+	if name := strings.TrimSpace(subNames[subID]); name != "" {
+		return name
+	}
+	return subID
+}
+
 
 func verifyProxy(host string, port int) bool {
 	if host == "" {

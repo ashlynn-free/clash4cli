@@ -12,11 +12,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Subscription sub-tabs on the Nodes page now scroll horizontally when they exceed the terminal width.
 - Subscription switching no longer forcefully deselects the running node; slots from other subscriptions keep running independently.
 - Settings tab now scrolls to keep the focused item visible.
+- Settings tab scrolling now behaves more like the Nodes table: it follows the focused item, shows a scroll position indicator, and keeps the help line fixed at the bottom.
 - Settings: Mixed Port label and help text are now localized (i18n) across all 14 supported languages.
+- c4cgo slot listing now shows the subscription's user-defined name instead of only the internal subscription ID when available.
 - Removed unused subscription delta fields (`LastUpdateAdded`, `LastUpdateRemoved`) from storage.
 
 ### Fixed
 - Subscriptions tab UI sync improvements.
+- Settings tab no longer pushes the top tab bar off-screen at very short terminal heights; scrolling now clips by rendered lines and tab-switch sizing is consistent.
 
 ## v0.1.0 - 2026-02-01
 

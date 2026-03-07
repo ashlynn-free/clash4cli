@@ -459,15 +459,24 @@ func (t *SettingsTab) nextFlashTick() tea.Cmd {
 // View renders the tab
 func (t *SettingsTab) View() string {
 	var lines []string
-	// Track the line index where the focused item starts.
+	// Track the rendered line index where the focused item starts.
 	focusedLine := 0
+
+	appendBlock := func(block string) {
+		lines = append(lines, strings.Split(block, "\n")...)
+	}
+
+	appendLine := func(line string) {
+		lines = append(lines, line)
+	}
 
 	for i, field := range t.fields {
 		if field.fieldType == FieldTypeHeader {
 			if i == t.focusedField {
 				focusedLine = len(lines)
 			}
-			lines = append(lines, styles.Title.Render(field.label), "")
+			appendBlock(styles.Title.Render(field.label))
+			appendLine("")
 			continue
 		}
 
@@ -484,7 +493,7 @@ func (t *SettingsTab) View() string {
 		if field.disabled {
 			label = styles.Muted.Render("  " + field.label)
 		}
-		lines = append(lines, label)
+		appendBlock(label)
 		if field.helpText != "" {
 			helpText := "    " + field.helpText
 			if field.disabled {
@@ -492,7 +501,7 @@ func (t *SettingsTab) View() string {
 			} else {
 				helpText = styles.HelpText.Render(helpText)
 			}
-			lines = append(lines, helpText)
+			appendBlock(helpText)
 		}
 
 		switch field.fieldType {
@@ -501,10 +510,12 @@ func (t *SettingsTab) View() string {
 			if i == t.focusedField {
 				inputStyle = styles.InputFocused
 			}
-			lines = append(lines, inputStyle.Render(field.input.View()), "")
+			appendBlock(inputStyle.Render(field.input.View()))
+			appendLine("")
 
 		case FieldTypeSelect:
-			lines = append(lines, t.renderSelect(field, i == t.focusedField), "")
+			appendBlock(t.renderSelect(field, i == t.focusedField))
+			appendLine("")
 		}
 	}
 
@@ -516,7 +527,7 @@ func (t *SettingsTab) View() string {
 	} else {
 		saveLabel = styles.Muted.Render("  [" + saveLabel + "]")
 	}
-	lines = append(lines, saveLabel)
+	appendBlock(saveLabel)
 
 	// Restart core button
 	restartLabel := i18n.M().Settings.RestartCore
@@ -529,14 +540,15 @@ func (t *SettingsTab) View() string {
 	} else {
 		restartLabel = styles.Muted.Render("  [" + restartLabel + "]")
 	}
-	lines = append(lines, restartLabel)
+	appendBlock(restartLabel)
 
 	// Message
 	if t.message != "" && t.messageShow {
+		appendLine("")
 		if t.messageType == "success" {
-			lines = append(lines, "", styles.SuccessMessage.Render(t.message))
+			appendBlock(styles.SuccessMessage.Render(t.message))
 		} else {
-			lines = append(lines, "", styles.ErrorMessage.Render(t.message))
+			appendBlock(styles.ErrorMessage.Render(t.message))
 		}
 	}
 
@@ -546,27 +558,27 @@ func (t *SettingsTab) View() string {
 		styles.HelpKey.Render("Ctrl+S") + styles.HelpText.Render(" save  ") +
 		styles.HelpKey.Render("Ctrl+R") + styles.HelpText.Render(" restart")
 
+	// If size has not been set yet (tests / early init), render full content without clipping.
+	if t.height <= 0 {
+		content := strings.Join(lines, "\n")
+		content += "\n" + help
+		return styles.ContentArea.Render(content)
+	}
+
 	// Reserve lines for fixed bottom area: help text (1 line).
-	// When scrolling, also reserve 1 line for the scroll indicator.
-	needsScroll := t.height > 0 && len(lines) > t.height-1
+	// When scrolling, also reserve 1 line for the scroll indicator (only if enough space).
+	needsScroll := len(lines) > t.height-1
+	showScrollIndicator := needsScroll && t.height > 2
 	reservedBottom := 1 // help line
-	if needsScroll {
+	if showScrollIndicator {
 		reservedBottom = 2 // scroll indicator + help line
 	}
 	visibleHeight := t.height - reservedBottom
-
-	// If height hasn't been set or all content fits, show everything without scrolling.
-	if visibleHeight <= 0 || len(lines) <= visibleHeight {
-		content := strings.Join(lines, "\n")
-		content += "\n" + help
-		rendered := styles.ContentArea.Render(content)
-		if t.height > 0 {
-			return lipgloss.NewStyle().Height(t.height).Render(rendered)
-		}
-		return rendered
+	if visibleHeight < 1 {
+		visibleHeight = 1
 	}
 
-	// Adjust scroll offset to keep focused item visible
+	// Adjust scroll offset to keep focused item visible.
 	if focusedLine < t.scrollOffset {
 		t.scrollOffset = focusedLine
 	}
@@ -584,7 +596,6 @@ func (t *SettingsTab) View() string {
 		t.scrollOffset = maxOffset
 	}
 
-	// Slice visible window
 	start := t.scrollOffset
 	end := t.scrollOffset + visibleHeight
 	if end > len(lines) {
@@ -593,20 +604,18 @@ func (t *SettingsTab) View() string {
 	visible := lines[start:end]
 
 	content := strings.Join(visible, "\n")
-
-	// Scroll indicator (like Table component)
-	scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
-	scrollInfo := lipgloss.NewStyle().
-		Foreground(styles.MutedColor).
-		Width(t.width).
-		Align(lipgloss.Right).
-		Render(scrollText)
-	content += "\n" + scrollInfo
+	if showScrollIndicator {
+		scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
+		scrollInfo := lipgloss.NewStyle().
+			Foreground(styles.MutedColor).
+			Width(t.width).
+			Align(lipgloss.Right).
+			Render(scrollText)
+		content += "\n" + scrollInfo
+	}
 	content += "\n" + help
 
-	return lipgloss.NewStyle().Height(t.height).Render(
-		styles.ContentArea.Render(content),
-	)
+	return styles.ContentArea.Render(content)
 }
 
 func (t *SettingsTab) renderSelect(field settingField, focused bool) string {

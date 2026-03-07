@@ -204,8 +204,14 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 		return fmt.Errorf("mixed-port %d (slot %d) is already used by another slot", mixedPort, slotID)
 	}
 	if !canListenTCP(proxyListenHost, mixedPort) {
-		c.status = StatusError
-		return fmt.Errorf("mixed-port %d (slot %d) is already in use by another program; free the port or change base-mixed-port in config", mixedPort, slotID)
+		// Attempt to kill stale mihomo process on this port
+		if killStaleProcessOnPort(mixedPort) {
+			c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Killed stale mihomo process on port %d", mixedPort)}
+		}
+		if !canListenTCP(proxyListenHost, mixedPort) {
+			c.status = StatusError
+			return fmt.Errorf("mixed-port %d (slot %d) is already in use by another program; free the port or change base-mixed-port in config", mixedPort, slotID)
+		}
 	}
 	forbidden[mixedPort] = struct{}{}
 
@@ -219,8 +225,13 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 		return fmt.Errorf("api-port %d (slot %d) is already used by another slot", apiPort, slotID)
 	}
 	if !canListenTCP(apiHost, apiPort) {
-		c.status = StatusError
-		return fmt.Errorf("api-port %d (slot %d) is already in use by another program; free the port or change base-api-port in config", apiPort, slotID)
+		if killStaleProcessOnPort(apiPort) {
+			c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Killed stale mihomo process on port %d", apiPort)}
+		}
+		if !canListenTCP(apiHost, apiPort) {
+			c.status = StatusError
+			return fmt.Errorf("api-port %d (slot %d) is already in use by another program; free the port or change base-api-port in config", apiPort, slotID)
+		}
 	}
 
 	c.port = mixedPort
