@@ -334,7 +334,11 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 		StartedAt:         time.Now().UTC().Format(time.RFC3339),
 		Detached:          true,
 	}
-	if err := writeLockFile(lock); err != nil {
+	// Write lock file in v2 (MultiLockFile) format so it won't be misinterpreted
+	// on TUI restart. Slot 0 is used as the default for the legacy Start() path.
+	if err := updateMultiLockFile(func(mlf *MultiLockFile) {
+		mlf.Instances[0] = lock
+	}); err != nil {
 		logger.Warn("Failed to create lock file: %v", err)
 	}
 
@@ -697,9 +701,11 @@ func (c *Controller) SwitchGroup(groupName, entryName string) error {
 	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Switched %s to: %s", groupName, entryName)}
 	logger.Info("Switched %s to: %s", groupName, entryName)
 
-	_ = updateLockFile(func(l *LockFile) {
-		l.Node = entryName
-	})
+	// NOTE: Do NOT update the lock file here with v1 updateLockFile().
+	// The SlotManager already tracks node names via slotNodes and writes the
+	// v2 MultiLockFile. A v1 write here would overwrite the v2 data with
+	// zero-valued fields (PID=0, Port=0), breaking lock file restoration on
+	// TUI restart.
 
 	return nil
 }
@@ -904,17 +910,23 @@ func (c *Controller) lockFileLooksAlive(lock *LockFile) bool {
 	if lock.Port <= 0 || lock.Port >= 65536 || lock.PID <= 0 {
 		return false
 	}
+	if !isProcessAlive(lock.PID) {
+		return false
+	}
 	proxyHost := lock.ProxyHost
 	if proxyHost == "" {
 		proxyHost = "127.0.0.1"
 	}
-	if !isTCPReachable(proxyHost, lock.Port) {
-		return false
+	// Retry TCP check: mihomo may be slow to accept connections on cold start
+	for attempt := 0; attempt < 3; attempt++ {
+		if isTCPReachable(proxyHost, lock.Port) {
+			return true
+		}
+		if attempt < 2 {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
-	if !isProcessAlive(lock.PID) {
-		return false
-	}
-	return true
+	return false
 }
 
 func (c *Controller) applyLockFileLocked(lock *LockFile) {

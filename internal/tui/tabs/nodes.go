@@ -128,8 +128,21 @@ func (t *NodesTab) View() string {
 func (t *NodesTab) SetSize(width, height int) {
 	t.width = width
 	t.height = height
-	// Reserve 1 line for subscription sub-tabs
-	rowsHeight := height - 1
+	// Reserve space for fixed elements that are always displayed:
+	// - subTabs line + BorderBottom: 2 lines
+	// - table header: 1 line
+	// - table separator: 1 line
+	// - help text (rendered after table): 1 line
+	// - scroll indicator (when scrolling, added by table.View): 1 line
+	// - extra line for tab bar BorderBottom (not fully covered by contentHeight): 1 line
+	// Total: 7 lines reserved
+	//
+	// Note: We always reserve the scroll indicator line for consistency,
+	// even though it's only shown when len(rows) > table height.
+	// This prevents overflow when switching to large subscriptions.
+	const reservedLines = 7
+
+	rowsHeight := height - reservedLines
 	if rowsHeight < 1 {
 		rowsHeight = 1
 	}

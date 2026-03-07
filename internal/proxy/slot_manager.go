@@ -160,6 +160,7 @@ func (sm *SlotManager) SetSlotMode(slotID int, mode string) error {
 
 	sm.mu.Lock()
 	sm.slotModes[slotID] = mode
+	sm.saveSlotHistoryLocked()
 	sm.mu.Unlock()
 
 	return nil
@@ -305,6 +306,9 @@ func (sm *SlotManager) StopAll() {
 func (sm *SlotManager) SyncFromLockFile() {
 	mlf, err := ReadMultiLockFile()
 	if err != nil || mlf == nil {
+		if err != nil {
+			logger.Warn("Failed to read proxy.lock: %v", err)
+		}
 		return
 	}
 
@@ -331,6 +335,8 @@ func (sm *SlotManager) SyncFromLockFile() {
 			proxyHost: "127.0.0.1",
 		}
 		if !tmpCtrl.lockFileLooksAlive(&lock) {
+			logger.Warn("Slot %d lock entry not alive (pid=%d, port=%d, host=%s): skipping",
+				slotID, lock.PID, lock.Port, lock.ProxyHost)
 			continue
 		}
 
@@ -339,7 +345,12 @@ func (sm *SlotManager) SyncFromLockFile() {
 		sc.AttachFromLock(&lockCopy)
 
 		sm.slots[slotID] = sc
-		sm.slotModes[slotID] = "rule" // assume rule on restore
+		// Restore mode from config history; default to "rule" if not saved
+		restoredMode := "rule"
+		if sm.slotHistory[slotID] != nil && sm.slotHistory[slotID].Mode != "" {
+			restoredMode = sm.slotHistory[slotID].Mode
+		}
+		sm.slotModes[slotID] = restoredMode
 		sm.slotNodes[slotID] = lock.Node
 		sm.slotSubIDs[slotID] = lock.SubID
 		if lock.Node != "" {
@@ -349,12 +360,20 @@ func (sm *SlotManager) SyncFromLockFile() {
 		sm.slotHistory[slotID] = &config.SlotHistoryEntry{
 			SlotID:   slotID,
 			NodeName: lock.Node,
-			Mode:     "rule",
+			Mode:     restoredMode,
 			SubID:    lock.SubID,
 		}
 
 		logger.Info("Restored slot %d from lock file (pid=%d, port=%d, node=%s)", slotID, lock.PID, lock.Port, lock.Node)
 		sm.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Restored slot %d (PID: %d, port: %d)", slotID, lock.PID, lock.Port)}
+
+		// Apply non-default mode to mihomo after it's ready
+		if restoredMode != "rule" {
+			go func(id int, mode string) {
+				time.Sleep(1 * time.Second)
+				_ = sm.SetSlotMode(id, mode)
+			}(slotID, restoredMode)
+		}
 
 		go sm.forwardLogs(slotID, sc)
 	}
