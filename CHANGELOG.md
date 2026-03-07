@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
-## v0.3.0 - 2026-03-08
+## v0.4.0 - 2026-03-08
 
 ### Changed
 - Slot ports are now deterministic: slot N always uses `baseMixedPort + N` and `baseAPIPort + N`. If the port is occupied, the slot fails with a clear error instead of silently scanning for alternatives.
