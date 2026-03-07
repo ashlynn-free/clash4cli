@@ -19,30 +19,40 @@ type NodeTestResultMsg struct {
 	Result node.TestResult
 }
 
+// SlotIndicator describes a proxy slot bound to a node.
+type SlotIndicator struct {
+	SlotID int
+	Icon   string // "📜" or "🌐"
+}
+
 // NodesTab represents the nodes tab
 type NodesTab struct {
-	table             *components.Table
-	nodeManager       *node.Manager
-	nodes             []subscription.Node
-	width             int
-	height            int
-	testing           bool
-	cancelTest        context.CancelFunc
-	subscriptionID    string
-	connectedNodeName string
-	connectedIcon     string
-	serverDisplay     string // show|blur|off
-	preselectName     string
-	preselectServer   string
-	preselectPort     int
+	table          *components.Table
+	nodeManager    *node.Manager
+	nodes          []subscription.Node
+	width          int
+	height         int
+	testing        bool
+	cancelTest     context.CancelFunc
+	subscriptionID string
+	// Multi-slot indicators: node name → indicator
+	slotIndicators map[string]SlotIndicator
+	// Per-node traffic info for active slots: node name → formatted string
+	slotTraffic    map[string]string
+	serverDisplay  string // show|blur|off
+	preselectName  string
+	preselectServer string
+	preselectPort  int
 }
 
 // NewNodesTab creates a new nodes tab
 func NewNodesTab(nodeMgr *node.Manager) *NodesTab {
 	return &NodesTab{
-		table:         components.NewTable(nil),
-		nodeManager:   nodeMgr,
-		serverDisplay: "show",
+		table:          components.NewTable(nil),
+		nodeManager:    nodeMgr,
+		serverDisplay:  "show",
+		slotIndicators: make(map[string]SlotIndicator),
+		slotTraffic:    make(map[string]string),
 	}
 }
 
@@ -82,6 +92,7 @@ func (t *NodesTab) Update(msg tea.Msg) (*NodesTab, tea.Cmd) {
 	case NodesRefreshedMsg:
 		t.nodes = msg.Nodes
 		t.updateTableRows()
+		t.applyPreselect()
 	}
 
 	return t, nil
@@ -95,18 +106,15 @@ func (t *NodesTab) View() string {
 		return styles.Muted.Render(m.Nodes.NoNodes)
 	}
 
-	// Table
-	rowsHeight := t.height - 4
-	if rowsHeight < 1 {
-		rowsHeight = 1
-	}
-	t.table.SetHeight(rowsHeight)
+	// Table height is already set in SetSize()
 	tableView := t.table.View()
 
 	// Help
 	help := styles.HelpKey.Render("↑/↓") + styles.HelpText.Render(" navigate  ") +
-		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" mode  ") +
-		styles.HelpKey.Render("t") + styles.HelpText.Render(" test all  ") +
+		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" slot0  ") +
+		styles.HelpKey.Render("0-9") + styles.HelpText.Render(" slots  ") +
+		styles.HelpKey.Render("D") + styles.HelpText.Render(" disconnect all  ") +
+		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
 		styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh")
 
 	if t.testing {
@@ -120,6 +128,12 @@ func (t *NodesTab) View() string {
 func (t *NodesTab) SetSize(width, height int) {
 	t.width = width
 	t.height = height
+	// Reserve 1 line for subscription sub-tabs
+	rowsHeight := height - 1
+	if rowsHeight < 1 {
+		rowsHeight = 1
+	}
+	t.table.SetHeight(rowsHeight)
 	t.table.SetColumns(calcNodeTableColumns(width, t.serverDisplay))
 }
 
@@ -132,17 +146,16 @@ func calcNodeTableColumns(width int, serverDisplay string) []components.Column {
 		width = 0
 	}
 
-	iconW := 3
-	typeW := 10
+	iconW := 4
 	latencyW := 10
-	statusW := 10
+	statusW := 25
 	showServer := serverDisplay != "off"
 
 	minNameW := 16
 	baseNameW := 27
 
 	minServerW := 18
-	fixed := iconW + typeW + latencyW + statusW
+	fixed := iconW + latencyW + statusW
 	if showServer {
 		// serverW will be computed from remaining; the fixed part stays the same.
 	} else {
@@ -193,7 +206,6 @@ func calcNodeTableColumns(width int, serverDisplay string) []components.Column {
 	columns := []components.Column{
 		{Title: "", Width: iconW},
 		{Title: "Name", Width: nameW},
-		{Title: "Type", Width: typeW},
 	}
 	if showServer {
 		columns = append(columns, components.Column{Title: "Server", Width: serverW})
@@ -219,12 +231,12 @@ func (t *NodesTab) updateTableRows() {
 		result := t.nodeManager.GetNodeWithResult(&t.nodes[i])
 
 		icon := ""
-		if t.connectedIcon != "" && t.connectedNodeName != "" && n.Name == t.connectedNodeName {
-			icon = t.connectedIcon
+		if ind, ok := t.slotIndicators[n.Name]; ok {
+			icon = fmt.Sprintf("%s%d", ind.Icon, ind.SlotID)
 		}
 
 		latency := "-"
-		status := "Unknown"
+		status := ""
 
 		if result != nil {
 			switch result.Status {
@@ -239,10 +251,17 @@ func (t *NodesTab) updateTableRows() {
 				status = "Testing"
 			case node.StatusError:
 				status = "Error"
+			default:
+				status = ""
 			}
 		}
 
-		base := []string{icon, n.Name, n.Type}
+		// For active slots, show traffic in Status column
+		if traffic, ok := t.slotTraffic[n.Name]; ok && traffic != "" {
+			status = traffic
+		}
+
+		base := []string{icon, n.Name}
 		if showServer {
 			server := n.Server
 			if t.serverDisplay == "blur" {
@@ -253,8 +272,12 @@ func (t *NodesTab) updateTableRows() {
 		base = append(base, latency, status)
 		rows[i] = base
 	}
+	// Preserve the user's current cursor position across row rebuilds.
+	prevIdx := t.table.Selected()
 	t.table.SetRows(rows)
-	t.applyPreselect()
+	if prevIdx >= 0 && prevIdx < len(rows) {
+		t.table.SetSelected(prevIdx)
+	}
 }
 
 func (t *NodesTab) SetServerDisplay(mode string) {
@@ -322,9 +345,25 @@ func (t *NodesTab) selectNode() tea.Cmd {
 	return nil
 }
 
+// SetConnectionIndicator sets a single slot indicator (backward-compat wrapper for slot 0).
 func (t *NodesTab) SetConnectionIndicator(nodeName, icon string) {
-	t.connectedNodeName = nodeName
-	t.connectedIcon = icon
+	// Clear all indicators first, then set the single one.
+	t.slotIndicators = make(map[string]SlotIndicator)
+	if nodeName != "" && icon != "" {
+		t.slotIndicators[nodeName] = SlotIndicator{SlotID: 0, Icon: icon}
+	}
+	t.updateTableRows()
+}
+
+// SetSlotIndicators replaces all slot indicators at once.
+func (t *NodesTab) SetSlotIndicators(indicators map[string]SlotIndicator) {
+	t.slotIndicators = indicators
+	t.updateTableRows()
+}
+
+// SetSlotTraffic sets per-node traffic strings for active slots.
+func (t *NodesTab) SetSlotTraffic(traffic map[string]string) {
+	t.slotTraffic = traffic
 	t.updateTableRows()
 }
 

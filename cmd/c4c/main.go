@@ -67,7 +67,8 @@ Usage:
 Keyboard shortcuts (in TUI):
   Tab                  Switch tabs (Nodes/Subscriptions/Settings/Logs)
   j/k or ↑/↓          Navigate lists
-  Enter               (Nodes) Cycle mode (Disconnect/Rule/Global); (Subscriptions) Set active subscription
+  Enter               (Nodes) Slot 0: cycle mode (Rule/Global/Disconnect); (Subscriptions) Set active subscription
+  0-9                 (Nodes) Assign focused node to proxy slot 0-9
   t                   Test all nodes speed
   a                   Add subscription (in Subscriptions tab)
   d                   Delete subscription (in Subscriptions tab)

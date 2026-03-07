@@ -17,9 +17,9 @@ func TestLeavingSettingsTab_DiscardsUnsavedChanges(t *testing.T) {
 	cfg := config.DefaultConfig()
 	subMgr := subscription.NewManager()
 	nodeMgr := node.NewManager(subMgr, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
-	proxyCtrl := proxy.NewController(cfg)
+	slotMgr := proxy.NewSlotManager(cfg)
 
-	m := New(cfg, subMgr, nodeMgr, proxyCtrl, "dev", "")
+	m := New(cfg, subMgr, nodeMgr, slotMgr, "dev", "")
 	m.activeTab = TabSettings
 
 	// Type into the first field (mixed port) without saving.

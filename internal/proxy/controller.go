@@ -98,6 +98,7 @@ type Controller struct {
 	proxyHost  string
 	secret     string
 	logPath    string
+	attached   bool // true if restored from lockfile (not started by this process)
 }
 
 // NewController creates a new proxy controller

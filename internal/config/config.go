@@ -19,10 +19,12 @@ type Config struct {
 
 // ProxyConfig represents proxy port configuration
 type ProxyConfig struct {
-	MixedPort   int    `yaml:"mixed_port"` // Single port for both SOCKS5 and HTTP
-	AllowLan    bool   `yaml:"allow_lan"`
-	BindAddress string `yaml:"bind_address"`
-	TunEnabled  bool   `yaml:"tun_enabled"`
+	MixedPort    int    `yaml:"mixed_port"`     // Single port for both SOCKS5 and HTTP
+	BaseMixedPort int   `yaml:"base_mixed_port"` // Base mixed port for multi-instance offset
+	BaseAPIPort  int    `yaml:"base_api_port"`   // Base API port for multi-instance offset
+	AllowLan     bool   `yaml:"allow_lan"`
+	BindAddress  string `yaml:"bind_address"`
+	TunEnabled   bool   `yaml:"tun_enabled"`
 	// DockerRedirectTCP redirects Docker container TCP traffic (internet-bound) to mihomo redir-port via iptables.
 	// Linux only; requires root to apply iptables rules.
 	DockerRedirectTCP bool `yaml:"docker_redirect_tcp"`
@@ -52,6 +54,16 @@ type UIConfig struct {
 	SelectedNodeServer   string `yaml:"selected_node_server,omitempty"`
 	SelectedNodePort     int    `yaml:"selected_node_port,omitempty"`
 	SelectedNodeType     string `yaml:"selected_node_type,omitempty"`
+	// SlotHistory saves the last connected slot states for UI display
+	SlotHistory []SlotHistoryEntry `yaml:"slot_history,omitempty"`
+}
+
+// SlotHistoryEntry records a slot's historical connection state
+type SlotHistoryEntry struct {
+	SlotID   int    `yaml:"slot_id"`
+	NodeName string `yaml:"node_name"`
+	Mode     string `yaml:"mode"`
+	SubID    string `yaml:"sub_id"`
 }
 
 // DefaultConfig returns the default configuration
@@ -59,6 +71,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		Proxy: ProxyConfig{
 			MixedPort:         17890,
+			BaseMixedPort:     17890,
+			BaseAPIPort:       9090,
 			AllowLan:          true,
 			BindAddress:       "0.0.0.0",
 			TunEnabled:        false,

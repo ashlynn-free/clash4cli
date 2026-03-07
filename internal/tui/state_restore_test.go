@@ -46,9 +46,9 @@ func TestNew_RestoreActiveSubscriptionAndSelectedNodeFromConfig(t *testing.T) {
 	}
 
 	nodeMgr := node.NewManager(subMgr2, cfg2.SpeedTest.Concurrent, cfg2.SpeedTest.Timeout)
-	proxyCtrl := proxy.NewController(cfg2)
+	slotMgr := proxy.NewSlotManager(cfg2)
 
-	m := New(cfg2, subMgr2, nodeMgr, proxyCtrl, "dev", "")
+	m := New(cfg2, subMgr2, nodeMgr, slotMgr, "dev", "")
 
 	if m.activeSubID != sub.ID {
 		t.Fatalf("expected activeSubID=%q, got %q", sub.ID, m.activeSubID)
@@ -92,6 +92,7 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 		t.Fatalf("AddManual: %v", err)
 	}
 
+	// Write a v1 lock file (will be wrapped as slot 0).
 	lock := proxy.LockFile{
 		Port:       12345,
 		APIPort:    12346,
@@ -129,33 +130,25 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 	}
 
 	nodeMgr := node.NewManager(subMgr2, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
-	proxyCtrl := proxy.NewController(cfg)
-	if proxyCtrl.GetStatus() != proxy.StatusRunning {
-		t.Fatalf("expected proxy controller to detect running core from proxy.lock")
-	}
+	slotMgr := proxy.NewSlotManager(cfg)
 
-	m := New(cfg, subMgr2, nodeMgr, proxyCtrl, "dev", "")
+	m := New(cfg, subMgr2, nodeMgr, slotMgr, "dev", "")
 	if m.activeSubID != sub.ID {
 		t.Fatalf("expected activeSubID=%q, got %q", sub.ID, m.activeSubID)
 	}
 	if m.selectedNode == nil || m.selectedNode.Name != "TestNode" {
 		t.Fatalf("expected selectedNode restored from lock, got %#v", m.selectedNode)
 	}
-	if m.connectedNodeName != "TestNode" {
-		t.Fatalf("expected connectedNodeName=TestNode, got %q", m.connectedNodeName)
+
+	// Verify slot 0 was restored
+	state := slotMgr.GetSlotState(0)
+	if state == nil {
+		t.Fatalf("expected slot 0 to be restored from lock file")
 	}
-	if m.proxyMode != ProxyModeRule {
-		t.Fatalf("expected proxyMode=Rule, got %v", m.proxyMode)
+	if state.NodeName != "TestNode" {
+		t.Fatalf("expected slot 0 node=TestNode, got %q", state.NodeName)
 	}
 
-	// Stop "alive" detection and wait briefly for the monitor goroutine to exit.
+	// Stop "alive" detection for cleanup.
 	reachable = false
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if proxyCtrl.GetStatus() != proxy.StatusRunning {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("expected proxy controller to stop after listener closed")
 }

@@ -4,25 +4,19 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
-	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/proxy"
-	"rocket4cli/internal/subscription"
 	"rocket4cli/internal/tui/styles"
 )
 
 // StatusBar represents the status bar component
 type StatusBar struct {
-	width        int
-	proxyStatus  proxy.Status
-	selectedNode *subscription.Node
-	mixedPort    int
-	proxyMode    string
+	width       int
+	activeSlots int
 
-	trafficUploadTotal   int64
-	trafficDownloadTotal int64
-	trafficUploadRate    int64
-	trafficDownloadRate  int64
+	// Fields kept for setter compatibility (not displayed).
+	proxyStatus proxy.Status
+	mixedPort   int
+	proxyMode   string
 }
 
 // NewStatusBar creates a new status bar
@@ -44,9 +38,8 @@ func (s *StatusBar) SetProxyStatus(status proxy.Status) {
 	s.proxyStatus = status
 }
 
-// SetSelectedNode sets the selected node
-func (s *StatusBar) SetSelectedNode(node *subscription.Node) {
-	s.selectedNode = node
+// SetSelectedNode is a no-op kept for API compatibility.
+func (s *StatusBar) SetSelectedNode(node interface{}) {
 }
 
 // SetMixedPort sets the mixed port
@@ -59,110 +52,38 @@ func (s *StatusBar) SetProxyMode(mode string) {
 	s.proxyMode = mode
 }
 
-// SetTraffic sets traffic totals and rates (bytes per second).
-func (s *StatusBar) SetTraffic(uploadTotal, downloadTotal, uploadRate, downloadRate int64) {
-	s.trafficUploadTotal = uploadTotal
-	s.trafficDownloadTotal = downloadTotal
-	s.trafficUploadRate = uploadRate
-	s.trafficDownloadRate = downloadRate
+// SetActiveSlots sets the number of active proxy slots.
+func (s *StatusBar) SetActiveSlots(count int) {
+	s.activeSlots = count
 }
 
-func (s *StatusBar) ClearTraffic() {
-	s.trafficUploadTotal = 0
-	s.trafficDownloadTotal = 0
-	s.trafficUploadRate = 0
-	s.trafficDownloadRate = 0
-}
+// SetTraffic is a no-op; traffic is shown per-node in the nodes table.
+func (s *StatusBar) SetTraffic(uploadTotal, downloadTotal, uploadRate, downloadRate int64) {}
+
+// ClearTraffic is a no-op.
+func (s *StatusBar) ClearTraffic() {}
 
 // View renders the status bar
 func (s *StatusBar) View() string {
-	m := i18n.M()
-
-	// Status indicator
-	var statusText string
-	var statusStyle lipgloss.Style
-
-	switch s.proxyStatus {
-	case proxy.StatusRunning:
-		switch s.proxyMode {
-		case "Rule":
-			if m.Status.ConnectedRule != "" {
-				statusText = m.Status.ConnectedRule
-			} else {
-				statusText = m.Status.Connected + " (Rule)"
-			}
-		case "Global":
-			if m.Status.ConnectedGlobal != "" {
-				statusText = m.Status.ConnectedGlobal
-			} else {
-				statusText = m.Status.Connected + " (Global)"
-			}
-		default:
-			statusText = m.Status.Connected
-		}
-		statusStyle = styles.StatusConnected
-	case proxy.StatusStarting:
-		statusText = m.Status.Connecting
-		statusStyle = styles.StatusConnected
-	case proxy.StatusError:
-		statusText = m.Status.Error
-		statusStyle = styles.StatusError
-	default:
-		statusText = m.Status.Disconnected
-		statusStyle = styles.StatusDisconnected
+	// Left: instance count
+	slotsText := fmt.Sprintf("%d/10 instances", s.activeSlots)
+	if s.activeSlots > 0 {
+		slotsText = styles.StatusConnected.Render(slotsText)
+	} else {
+		slotsText = styles.StatusDisconnected.Render(slotsText)
 	}
 
-	status := statusStyle.Render("● " + statusText)
+	left := slotsText
 
-	// Port info - mixed port for both SOCKS5 and HTTP
-	portInfo := fmt.Sprintf("Mixed: %d", s.mixedPort)
-
-	modeInfo := styles.HelpKey.Render("Enter") +
-		styles.HelpText.Render(" to switch")
-
-	// Traffic info (only when running)
-	traffic := ""
-	if s.proxyStatus == proxy.StatusRunning {
-		traffic = fmt.Sprintf("↑%s ↓%s", formatRate(s.trafficUploadRate), formatRate(s.trafficDownloadRate))
-		if s.width >= 120 {
-			traffic += fmt.Sprintf(" · Σ↑%s Σ↓%s", formatBytes(s.trafficUploadTotal), formatBytes(s.trafficDownloadTotal))
-		}
-	}
-
-	rightParts := []string{portInfo, styles.HelpKey.Render("q") + styles.HelpText.Render("uit")}
-	if traffic != "" {
-		rightParts = append([]string{traffic}, rightParts...)
-	}
-	right := ""
-	for _, part := range rightParts {
-		if part == "" {
-			continue
-		}
-		if right != "" {
-			right += "  "
-		}
-		right += part
-	}
-
-	// Node info (truncate to fit)
-	nodeText := "-"
-	if s.selectedNode != nil {
-		nodeText = s.selectedNode.Name
-	}
-	fixedLeft := status + "  " + modeInfo + "  " + styles.Muted.Render("Node: ")
-	availableNodeW := s.width - lipgloss.Width(fixedLeft) - lipgloss.Width(right) - 4
-	if availableNodeW < 1 {
-		availableNodeW = 1
-	}
-	nodeText = runewidth.Truncate(nodeText, availableNodeW, "…")
-
-	left := fixedLeft + nodeText
+	// Right: shortcuts
+	right := styles.HelpKey.Render("0-9") + styles.HelpText.Render(" slot  ") +
+		styles.HelpKey.Render("←/→") + styles.HelpText.Render(" sub  ") +
+		styles.HelpKey.Render("q") + styles.HelpText.Render("uit")
 
 	// Calculate spacing
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
 	spacing := s.width - leftWidth - rightWidth - 4
-
 	if spacing < 0 {
 		spacing = 1
 	}
@@ -174,7 +95,8 @@ func (s *StatusBar) View() string {
 	)
 }
 
-func formatRate(bytesPerSec int64) string {
+// FormatRate formats bytes per second into a human-readable string.
+func FormatRate(bytesPerSec int64) string {
 	if bytesPerSec < 0 {
 		return "-"
 	}

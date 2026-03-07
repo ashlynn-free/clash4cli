@@ -29,31 +29,6 @@ const (
 	TabLogs
 )
 
-type ProxyMode int
-
-const (
-	ProxyModeRule ProxyMode = iota
-	ProxyModeGlobal
-	ProxyModeDisconnect
-)
-
-func (pm ProxyMode) String() string {
-	switch pm {
-	case ProxyModeRule:
-		return "Rule"
-	case ProxyModeGlobal:
-		return "Global"
-	case ProxyModeDisconnect:
-		return "Disconnect"
-	default:
-		return "Unknown"
-	}
-}
-
-func (pm ProxyMode) next() ProxyMode {
-	return ProxyMode((int(pm) + 1) % 3)
-}
-
 func sameNode(a, b *subscription.Node) bool {
 	if a == nil || b == nil {
 		return false
@@ -79,27 +54,25 @@ type Model struct {
 	cfg        *config.Config
 	subManager *subscription.Manager
 	nodeMgr    *node.Manager
-	proxyCtrl  *proxy.Controller
+	slotMgr    *proxy.SlotManager
 
 	// UI State
-	activeTab         Tab
-	width             int
-	height            int
-	ready             bool
-	quitting          bool
-	version           string
-	startupWarning    string
-	showSplash        bool
-	activeSubID       string
-	selectedNode      *subscription.Node
-	connectedNodeName string
-	proxyMode         ProxyMode
-	overlayText       string
-	overlayID         int
+	activeTab      Tab
+	width          int
+	height         int
+	ready          bool
+	quitting       bool
+	version        string
+	startupWarning string
+	showSplash     bool
+	activeSubID    string
+	subTabIdx      int
+	selectedNode   *subscription.Node
+	overlayText    string
+	overlayID      int
 
-	trafficLastAt            time.Time
-	trafficLastUploadTotal   int64
-	trafficLastDownloadTotal int64
+	// Per-slot traffic tracking (slot → last snapshot)
+	slotTrafficLast map[int]trafficSnapshot
 
 	// Components
 	statusBar *components.StatusBar
@@ -111,21 +84,27 @@ type Model struct {
 	logsTab     *tabs.LogsTab
 }
 
+type trafficSnapshot struct {
+	at            time.Time
+	uploadTotal   int64
+	downloadTotal int64
+}
+
 // New creates a new TUI model
-func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, proxyCtrl *proxy.Controller, version string, startupWarning string) *Model {
+func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, slotMgr *proxy.SlotManager, version string, startupWarning string) *Model {
 	m := &Model{
-		cfg:            cfg,
-		subManager:     subMgr,
-		nodeMgr:        nodeMgr,
-		proxyCtrl:      proxyCtrl,
-		proxyMode:      ProxyModeDisconnect,
-		statusBar:      components.NewStatusBar(),
-		nodesTab:       tabs.NewNodesTab(nodeMgr),
-		subsTab:        tabs.NewSubscriptionsTab(subMgr),
-		settingsTab:    tabs.NewSettingsTab(cfg),
-		logsTab:        tabs.NewLogsTab(),
-		version:        strings.TrimSpace(version),
-		startupWarning: strings.TrimSpace(startupWarning),
+		cfg:             cfg,
+		subManager:      subMgr,
+		nodeMgr:         nodeMgr,
+		slotMgr:         slotMgr,
+		statusBar:       components.NewStatusBar(),
+		nodesTab:        tabs.NewNodesTab(nodeMgr),
+		subsTab:         tabs.NewSubscriptionsTab(subMgr),
+		settingsTab:     tabs.NewSettingsTab(cfg),
+		logsTab:         tabs.NewLogsTab(),
+		version:         strings.TrimSpace(version),
+		startupWarning:  strings.TrimSpace(startupWarning),
+		slotTrafficLast: make(map[int]trafficSnapshot),
 	}
 
 	if m.nodesTab != nil {
@@ -140,6 +119,11 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		if m.subsTab != nil {
 			m.subsTab.SetActiveSubscription(m.activeSubID)
 		}
+	}
+
+	// Set the save history callback for slot manager
+	if slotMgr != nil {
+		slotMgr.SetSaveHistoryFunc(m.persistSlotHistory)
 	}
 
 	m.restoreSelectionFromConfig()
@@ -229,6 +213,17 @@ func (m *Model) persistSplashShown(now time.Time) tea.Cmd {
 	}
 }
 
+// persistSlotHistory saves the slot history to the config file.
+func (m *Model) persistSlotHistory(history []config.SlotHistoryEntry) {
+	if m == nil || m.cfg == nil {
+		return
+	}
+	m.cfg.UI.SlotHistory = history
+	if err := m.cfg.Save(); err != nil {
+		logger.Warn("failed to save slot history config: %v", err)
+	}
+}
+
 func (m *Model) showStartupWarningOverlay() tea.Cmd {
 	if m == nil || strings.TrimSpace(m.startupWarning) == "" {
 		return nil
@@ -285,60 +280,49 @@ func (m *Model) restoreSelectionFromConfig() {
 }
 
 func (m *Model) restoreStateFromProxyLock() {
-	if m == nil || m.proxyCtrl == nil || m.subManager == nil || m.nodeMgr == nil {
-		return
-	}
-	if m.proxyCtrl.GetStatus() != proxy.StatusRunning {
+	if m == nil || m.slotMgr == nil || m.subManager == nil || m.nodeMgr == nil {
 		return
 	}
 
-	lock, err := proxy.ReadLockFile()
-	if err != nil || lock == nil {
+	// SyncFromLockFile restores all slots from the multi-lock file.
+	m.slotMgr.SyncFromLockFile()
+
+	// Update UI based on restored slots.
+	activeSlots := m.slotMgr.ActiveSlots()
+	if len(activeSlots) == 0 {
 		return
 	}
 
-	subID, node := inferSubscriptionAndNode(m.subManager, lock)
-	if subID != "" {
-		m.activeSubID = subID
+	// Use the first active slot to infer subscription context.
+	first := activeSlots[0]
+	if first.SubID != "" {
+		m.activeSubID = first.SubID
 		if m.nodesTab != nil {
-			m.nodesTab.SetSubscriptionID(subID)
+			m.nodesTab.SetSubscriptionID(first.SubID)
 		}
 		if m.subsTab != nil {
-			m.subsTab.SetActiveSubscription(subID)
+			m.subsTab.SetActiveSubscription(first.SubID)
 		}
 	}
 
-	if node == nil && lock.Node != "" {
-		// Best-effort: show the current node in UI even if we cannot find it in subscriptions.
-		node = &subscription.Node{
-			Name:   lock.Node,
-			Type:   lock.NodeType,
-			Server: lock.NodeServer,
-			Port:   lock.NodePort,
+	// Set selected node from slot 0 (or first slot).
+	if first.NodeName != "" {
+		nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
+		for i := range nodes {
+			if nodes[i].Name == first.NodeName {
+				m.selectedNode = &nodes[i]
+				m.nodeMgr.Select(m.selectedNode)
+				m.statusBar.SetSelectedNode(m.selectedNode)
+				if m.nodesTab != nil {
+					m.nodesTab.SetPreselect(m.selectedNode)
+				}
+				break
+			}
 		}
 	}
 
-	if node != nil {
-		m.selectedNode = node
-		m.nodeMgr.Select(node)
-		m.statusBar.SetSelectedNode(node)
-		if m.nodesTab != nil {
-			m.nodesTab.SetPreselect(node)
-		}
-	}
-
-	if lock.Node != "" {
-		m.connectedNodeName = lock.Node
-		m.proxyMode = ProxyModeRule
-		if m.nodesTab != nil {
-			m.nodesTab.SetConnectionIndicator(lock.Node, proxyModeIcon(m.proxyMode))
-		}
-	}
-
-	// Backfill lock metadata for future restarts (best-effort).
-	if lock.SubID == "" && subID != "" {
-		m.proxyCtrl.UpdateLockState(subID, node)
-	}
+	// Update slot indicators
+	m.updateSlotIndicators()
 }
 
 func inferSubscriptionAndNode(subMgr *subscription.Manager, lock *proxy.LockFile) (string, *subscription.Node) {
@@ -411,7 +395,7 @@ func (m *Model) Init() tea.Cmd {
 		m.subsTab.Init(),
 		m.settingsTab.Init(),
 		m.logsTab.Init(),
-		m.listenProxyLogs(),
+		m.listenSlotLogs(),
 		m.listenAppLogs(),
 		m.pollTraffic(),
 	)
@@ -467,44 +451,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case m.activeTab == TabNodes && key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			// Use the highlighted node as "selected" and cycle proxy mode:
-			// Disconnect -> Rule -> Global -> Disconnect.
-			nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
-			if len(nodes) == 0 {
-				return m, func() tea.Msg { return overlayMsg{text: i18n.M().Nodes.NoNodes} }
-			}
+			return m, m.handleSlotAction(0)
 
-			var focused *subscription.Node
-			if m.nodesTab != nil {
-				focused = m.nodesTab.GetSelectedNode()
-			}
-			if focused == nil {
-				focused = &nodes[0]
-			}
+		case m.activeTab == TabNodes && isDigitKey(msg):
+			slotID := digitKeyToSlot(msg)
+			return m, m.handleSlotAction(slotID)
 
-			sameAsPrev := sameNode(m.selectedNode, focused)
-			if focused != nil && !sameAsPrev {
-				m.selectedNode = focused
-				m.nodeMgr.Select(focused)
-				m.statusBar.SetSelectedNode(focused)
-				if m.nodesTab != nil {
-					m.nodesTab.SetPreselect(focused)
-				}
-				m.logsTab.AddLog("info", fmt.Sprintf("Selected node: %s", focused.Name))
-			}
-			persistCmd := m.persistSelectedNode(m.activeSubID, focused)
+		case m.activeTab == TabNodes && key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
+			return m, m.switchSubscription(-1)
 
-			if m.proxyCtrl.GetStatus() == proxy.StatusRunning {
-				// If the user chose a different node, keep the current mode and just switch node.
-				// Only cycle mode when pressing Enter again on the same node.
-				if focused != nil && !sameAsPrev {
-					return m, tea.Batch(persistCmd, m.switchNode(focused))
-				}
-				return m, tea.Batch(persistCmd, m.cycleProxyMode())
-			}
+		case m.activeTab == TabNodes && key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
+			return m, m.switchSubscription(1)
 
-			// When disconnected, pressing Enter always connects (Rule) for the focused node.
-			return m, tea.Batch(persistCmd, m.startProxy())
+		case m.activeTab == TabNodes && key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
+			m.disconnectAllSlots()
+			return m, tea.Batch(m.nodesTab.Init())
 		}
 
 	case overlayMsg:
@@ -531,12 +492,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.nodesTab.SetPreselect(msg.Node)
 		}
 		m.logsTab.AddLog("info", fmt.Sprintf("Selected node: %s", msg.Node.Name))
-		// If proxy is running, just switch node via API; otherwise start it
-		if m.proxyCtrl.GetStatus() == proxy.StatusRunning {
-			cmds = append(cmds, tea.Batch(m.persistSelectedNode(m.activeSubID, msg.Node), m.switchNode(msg.Node)))
-		} else {
-			cmds = append(cmds, tea.Batch(m.persistSelectedNode(m.activeSubID, msg.Node), m.startProxy()))
-		}
+		cmds = append(cmds, m.persistSelectedNode(m.activeSubID, msg.Node))
 
 	case tabs.SubscriptionAddedMsg:
 		// Refresh nodes when subscription is added
@@ -554,8 +510,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tabs.SubscriptionSelectedMsg:
 		if msg.ID != "" && msg.ID != m.activeSubID {
-			// Switching subscription should disconnect the old subscription's nodes/proxy.
-			m.disconnectProxy()
+			// Switching subscription does NOT disconnect running slots.
+			// Slots from other subscriptions keep running independently.
 			m.selectedNode = nil
 			m.nodeMgr.Select(nil)
 			m.statusBar.SetSelectedNode(nil)
@@ -580,31 +536,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Ensure we have an active subscription (for Nodes filtering).
 		newActive := m.activeSubID
+		newSubTabIdx := m.subTabIdx
 		if len(msg.Subs) == 0 {
 			newActive = ""
+			newSubTabIdx = 0
 		} else {
 			valid := false
-			for _, sub := range msg.Subs {
+			for i, sub := range msg.Subs {
 				if sub != nil && sub.ID == m.activeSubID {
 					valid = true
+					newSubTabIdx = i
 					break
 				}
 			}
 			if newActive == "" || !valid {
 				newActive = msg.Subs[0].ID
+				newSubTabIdx = 0
 			}
 		}
 
 		if newActive != prevActive && prevActive != "" {
-			// If the active subscription changes (including deletion), disconnect old nodes/proxy.
-			// NOTE: On startup, prevActive may be empty while a background proxy core is running;
-			// we should not kill it just because we picked a default subscription.
-			m.disconnectProxy()
 			m.selectedNode = nil
 			m.nodeMgr.Select(nil)
 			m.statusBar.SetSelectedNode(nil)
 		}
 		m.activeSubID = newActive
+		m.subTabIdx = newSubTabIdx
 		cmds = append(cmds, m.persistActiveSubscription(m.activeSubID))
 
 		if m.nodesTab != nil {
@@ -628,7 +585,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tabs.RestartCoreMsg:
-		cmds = append(cmds, m.restartProxyCore())
+		cmds = append(cmds, m.restartSlot0())
 
 	case proxy.LogEntry:
 		// Forward to logs tab
@@ -636,7 +593,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logsTab, cmd = m.logsTab.Update(msg)
 		cmds = append(cmds, cmd)
 		// Continue listening for more logs
-		cmds = append(cmds, m.listenProxyLogs())
+		cmds = append(cmds, m.listenSlotLogs())
 
 	case logger.Entry:
 		// Forward app logs to logs tab
@@ -644,72 +601,71 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Continue listening for more logs
 		cmds = append(cmds, m.listenAppLogs())
 
-	case trafficMsg:
+	case slotTrafficMsg:
 		// Keep polling.
 		cmds = append(cmds, m.pollTraffic())
 
-		if !msg.running {
-			m.resetTraffic()
-			break
-		}
-		if msg.err != nil {
-			// Best-effort: keep the last known values; don't spam logs.
-			break
-		}
+		// Update per-slot traffic and compute rates for status bar (aggregate all slots).
+		var totalUpRate, totalDownRate, totalUp, totalDown int64
+		nodeTraffic := make(map[string]string)
 
-		uploadRate := int64(0)
-		downloadRate := int64(0)
-		if !m.trafficLastAt.IsZero() && msg.at.After(m.trafficLastAt) {
-			dt := msg.at.Sub(m.trafficLastAt).Seconds()
-			if dt > 0 && msg.uploadTotal >= m.trafficLastUploadTotal && msg.downloadTotal >= m.trafficLastDownloadTotal {
-				uploadRate = int64(float64(msg.uploadTotal-m.trafficLastUploadTotal) / dt)
-				downloadRate = int64(float64(msg.downloadTotal-m.trafficLastDownloadTotal) / dt)
+		for slotID, snap := range msg.snapshots {
+			prev, hasPrev := m.slotTrafficLast[slotID]
+			upRate := int64(0)
+			downRate := int64(0)
+
+			if hasPrev && !prev.at.IsZero() && snap.at.After(prev.at) {
+				dt := snap.at.Sub(prev.at).Seconds()
+				if dt > 0 {
+					if snap.uploadTotal >= prev.uploadTotal {
+						upRate = int64(float64(snap.uploadTotal-prev.uploadTotal) / dt)
+					}
+					if snap.downloadTotal >= prev.downloadTotal {
+						downRate = int64(float64(snap.downloadTotal-prev.downloadTotal) / dt)
+					}
+				}
+			}
+			m.slotTrafficLast[slotID] = snap
+			totalUpRate += upRate
+			totalDownRate += downRate
+			totalUp += snap.uploadTotal
+			totalDown += snap.downloadTotal
+
+			// Build per-node traffic string
+			state := m.slotMgr.GetSlotState(slotID)
+			if state != nil && state.NodeName != "" {
+				nodeTraffic[state.NodeName] = fmt.Sprintf(":%d ↑%s ↓%s",
+					state.Port,
+					components.FormatRate(upRate),
+					components.FormatRate(downRate),
+				)
 			}
 		}
 
-		// If the core restarted and counters reset, treat it as a baseline reset.
-		if msg.uploadTotal < m.trafficLastUploadTotal || msg.downloadTotal < m.trafficLastDownloadTotal {
-			uploadRate = 0
-			downloadRate = 0
+		// Clean up stale traffic entries
+		for slotID := range m.slotTrafficLast {
+			if _, ok := msg.snapshots[slotID]; !ok {
+				delete(m.slotTrafficLast, slotID)
+			}
 		}
 
-		m.trafficLastAt = msg.at
-		m.trafficLastUploadTotal = msg.uploadTotal
-		m.trafficLastDownloadTotal = msg.downloadTotal
 		if m.statusBar != nil {
-			m.statusBar.SetTraffic(msg.uploadTotal, msg.downloadTotal, uploadRate, downloadRate)
+			m.statusBar.SetTraffic(totalUp, totalDown, totalUpRate, totalDownRate)
+			m.statusBar.SetActiveSlots(m.slotMgr.ActiveSlotCount())
 		}
 
-	case proxyStatusMsg:
-		m.statusBar.SetProxyStatus(msg.status)
-		m.proxyMode = msg.mode
+		// Update node traffic display
+		if m.nodesTab != nil {
+			m.nodesTab.SetSlotTraffic(nodeTraffic)
+		}
+
+	case slotActionDoneMsg:
 		if msg.err != nil {
 			m.logsTab.AddLog("error", msg.err.Error())
 		}
-
-		// Track the currently connected node (best-effort).
-		if msg.status == proxy.StatusStopped || msg.mode == ProxyModeDisconnect {
-			m.connectedNodeName = ""
-		}
-		if msg.connectedNodeName != "" {
-			m.connectedNodeName = msg.connectedNodeName
-		}
-		if m.proxyCtrl.GetStatus() != proxy.StatusRunning || m.proxyMode == ProxyModeDisconnect {
-			m.connectedNodeName = ""
-		}
-
-		if msg.status != proxy.StatusRunning || msg.mode == ProxyModeDisconnect {
-			m.resetTraffic()
-		}
-
-		// Update node list indicator.
-		if m.nodesTab != nil {
-			if m.connectedNodeName == "" {
-				m.nodesTab.SetConnectionIndicator("", "")
-			} else {
-				m.nodesTab.SetConnectionIndicator(m.connectedNodeName, proxyModeIcon(m.proxyMode))
-			}
-		}
+		// Refresh slot indicators
+		m.updateSlotIndicators()
+		m.updateStatusBar()
 	}
 
 	// Update active tab
@@ -758,9 +714,14 @@ func (m *Model) View() string {
 	content.WriteString("\n")
 
 	// Content area
-	contentHeight := m.height - 4 // Tab bar + status bar
 	var contentView string
 	if m.overlayText != "" {
+		// Calculate content height for overlay centering: subtract tab bar (1) + status bar (1)
+		contentHeight := m.height - 2
+		if m.activeTab == TabNodes {
+			// Nodes tab has sub-tabs, subtract 1 more line for them
+			contentHeight--
+		}
 		maxWidth := 60
 		if m.width-10 < maxWidth {
 			maxWidth = m.width - 10
@@ -778,18 +739,12 @@ func (m *Model) View() string {
 	} else {
 		contentView = m.renderActiveTab()
 	}
-	content.WriteString(lipgloss.NewStyle().Height(contentHeight).Render(contentView))
+	content.WriteString(contentView)
 	content.WriteString("\n")
 
 	// Status bar
 	m.statusBar.SetWidth(m.width)
-	m.statusBar.SetProxyStatus(m.proxyCtrl.GetStatus())
-	if m.proxyCtrl != nil {
-		m.statusBar.SetMixedPort(m.proxyCtrl.CurrentPort())
-	} else {
-		m.statusBar.SetMixedPort(m.cfg.Proxy.MixedPort)
-	}
-	m.statusBar.SetProxyMode(m.proxyMode.String())
+	m.updateStatusBar()
 	content.WriteString(m.statusBar.View())
 
 	return content.String()
@@ -818,10 +773,71 @@ func (m *Model) renderTabBar() string {
 	return styles.TabBar.Width(m.width).Render(tabBar)
 }
 
+// renderSubTabs renders subscription sub-tabs for the Nodes page
+func (m *Model) renderSubTabs() string {
+	subs := m.subManager.List()
+	if len(subs) == 0 {
+		return ""
+	}
+
+	var subTabs []string
+	// Find the index of the currently active subscription by ID (more reliable than subTabIdx)
+	activeIdx := 0
+	if m.activeSubID != "" {
+		for i, sub := range subs {
+			if sub != nil && sub.ID == m.activeSubID {
+				activeIdx = i
+				break
+			}
+		}
+	}
+
+	for i, sub := range subs {
+		if sub == nil {
+			continue
+		}
+		// Check if this subscription has active slots
+		hasActiveSlots := false
+		for _, s := range m.slotMgr.ActiveSlots() {
+			if s.SubID == sub.ID {
+				hasActiveSlots = true
+				break
+			}
+		}
+
+		if i == activeIdx {
+			label := sub.Name
+			if hasActiveSlots {
+				label = "● " + label
+			}
+			subTabs = append(subTabs, styles.ActiveTab.Render(label))
+		} else {
+			label := sub.Name
+			if hasActiveSlots {
+				label = "● " + label
+			}
+			subTabs = append(subTabs, styles.InactiveTab.Render(label))
+		}
+	}
+
+	if len(subTabs) == 0 {
+		return ""
+	}
+
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, subTabs...)
+	return styles.TabBar.Width(m.width).Render(tabBar)
+}
+
 func (m *Model) renderActiveTab() string {
 	switch m.activeTab {
 	case TabNodes:
-		return m.nodesTab.View()
+		// Render subscription sub-tabs above nodes table
+		subTabs := m.renderSubTabs()
+		nodesView := m.nodesTab.View()
+		if subTabs != "" {
+			return subTabs + "\n" + nodesView
+		}
+		return nodesView
 	case TabSubscriptions:
 		return m.subsTab.View()
 	case TabSettings:
@@ -879,161 +895,152 @@ func wrapPlainText(s string, width int) string {
 }
 
 func (m *Model) updateSizes() {
-	contentHeight := m.height - 4
+	// Content height: subtract tab bar (1) + status bar (1)
+	contentHeight := m.height - 2
 	m.nodesTab.SetSize(m.width, contentHeight)
-	m.subsTab.SetSize(m.width, contentHeight)
-	m.settingsTab.SetSize(m.width, contentHeight)
-	m.logsTab.SetSize(m.width, contentHeight)
+	m.subsTab.SetSize(m.width, contentHeight-1)
+	m.settingsTab.SetSize(m.width, contentHeight-1)
+	m.logsTab.SetSize(m.width, contentHeight-1)
 }
 
-type proxyStatusMsg struct {
-	status            proxy.Status
-	mode              ProxyMode
-	err               error
-	connectedNodeName string
+// -- Message types --
+
+type slotActionDoneMsg struct {
+	slotID int
+	err    error
 }
 
-type trafficMsg struct {
-	at            time.Time
-	running       bool
-	uploadTotal   int64
-	downloadTotal int64
-	err           error
+type slotTrafficMsg struct {
+	snapshots map[int]trafficSnapshot
 }
+
+// -- Slot action dispatch --
+
+func isDigitKey(msg tea.KeyMsg) bool {
+	if len(msg.Runes) == 1 {
+		r := msg.Runes[0]
+		return r >= '0' && r <= '9'
+	}
+	return false
+}
+
+func digitKeyToSlot(msg tea.KeyMsg) int {
+	if len(msg.Runes) == 1 {
+		return int(msg.Runes[0] - '0')
+	}
+	return 0
+}
+
+func (m *Model) handleSlotAction(slotID int) tea.Cmd {
+	var focused *subscription.Node
+	if m.nodesTab != nil {
+		focused = m.nodesTab.GetSelectedNode()
+	}
+	if focused == nil {
+		nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
+		if len(nodes) > 0 {
+			focused = &nodes[0]
+		}
+	}
+	if focused == nil {
+		return func() tea.Msg { return overlayMsg{text: i18n.M().Nodes.NoNodes} }
+	}
+
+	// Track selection
+	if m.selectedNode == nil || !sameNode(m.selectedNode, focused) {
+		m.selectedNode = focused
+		m.nodeMgr.Select(focused)
+		m.statusBar.SetSelectedNode(focused)
+		if m.nodesTab != nil {
+			m.nodesTab.SetPreselect(focused)
+		}
+	}
+
+	persistCmd := m.persistSelectedNode(m.activeSubID, focused)
+
+	existingSlot, nodeInUse := m.slotMgr.NodeSlot(focused.Name)
+	state := m.slotMgr.GetSlotState(slotID)
+
+	if state == nil {
+		// Slot not running → start it
+		if nodeInUse && existingSlot != slotID {
+			// Node used in another slot → free it first
+			return tea.Batch(persistCmd, m.switchSlotToNode(slotID, existingSlot, focused))
+		}
+		subID := m.activeSubID
+		nodeCopy := *focused
+		nodes := m.subManager.GetNodesForSubscription(subID)
+		return tea.Batch(persistCmd, func() tea.Msg {
+			err := m.slotMgr.StartSlot(slotID, subID, nodes, &nodeCopy)
+			return slotActionDoneMsg{slotID: slotID, err: err}
+		})
+	}
+
+	if state.NodeName == focused.Name {
+		// Same node → cycle mode (rule → global → stop)
+		return tea.Batch(persistCmd, func() tea.Msg {
+			_, err := m.slotMgr.CycleSlotMode(slotID)
+			return slotActionDoneMsg{slotID: slotID, err: err}
+		})
+	}
+
+	// Slot running with different node → stop old, start with new node
+	return tea.Batch(persistCmd, m.restartSlotWithNode(slotID, focused))
+}
+
+// restartSlotWithNode stops a running slot and restarts it with a new node.
+func (m *Model) restartSlotWithNode(slotID int, node *subscription.Node) tea.Cmd {
+	nodeCopy := *node
+	subID := m.activeSubID
+	return func() tea.Msg {
+		_ = m.slotMgr.StopSlot(slotID)
+		time.Sleep(300 * time.Millisecond)
+		nodes := m.subManager.GetNodesForSubscription(subID)
+		err := m.slotMgr.StartSlot(slotID, subID, nodes, &nodeCopy)
+		return slotActionDoneMsg{slotID: slotID, err: err}
+	}
+}
+
+// switchSlotToNode moves a node from existingSlot to targetSlot.
+// If existingSlot had the node, stop it first; then start targetSlot with the node.
+func (m *Model) switchSlotToNode(targetSlot, existingSlot int, node *subscription.Node) tea.Cmd {
+	nodeCopy := *node
+	subID := m.activeSubID
+	return func() tea.Msg {
+		_ = m.slotMgr.StopSlot(existingSlot)
+		time.Sleep(300 * time.Millisecond)
+		nodes := m.subManager.GetNodesForSubscription(subID)
+		err := m.slotMgr.StartSlot(targetSlot, subID, nodes, &nodeCopy)
+		return slotActionDoneMsg{slotID: targetSlot, err: err}
+	}
+}
+
+// -- Traffic polling --
 
 func (m *Model) pollTraffic() tea.Cmd {
 	const interval = 1 * time.Second
 	return tea.Tick(interval, func(now time.Time) tea.Msg {
-		if m == nil || m.proxyCtrl == nil {
-			return trafficMsg{at: now, running: false}
+		if m == nil || m.slotMgr == nil {
+			return slotTrafficMsg{}
 		}
-		if m.proxyCtrl.GetStatus() != proxy.StatusRunning {
-			return trafficMsg{at: now, running: false}
+
+		snapshots := make(map[int]trafficSnapshot)
+		for _, s := range m.slotMgr.ActiveSlots() {
+			up, down, err := m.slotMgr.GetTrafficForSlot(s.SlotID)
+			if err != nil {
+				continue
+			}
+			snapshots[s.SlotID] = trafficSnapshot{at: now, uploadTotal: up, downloadTotal: down}
 		}
-		up, down, err := m.proxyCtrl.GetTrafficTotals()
-		if err != nil {
-			return trafficMsg{at: now, running: true, err: err}
-		}
-		return trafficMsg{at: now, running: true, uploadTotal: up, downloadTotal: down}
+		return slotTrafficMsg{snapshots: snapshots}
 	})
 }
 
-func (m *Model) resetTraffic() {
-	m.trafficLastAt = time.Time{}
-	m.trafficLastUploadTotal = 0
-	m.trafficLastDownloadTotal = 0
-	if m.statusBar != nil {
-		m.statusBar.ClearTraffic()
-	}
-}
+// -- Log listeners --
 
-func (m *Model) toggleProxy() tea.Cmd {
+func (m *Model) listenSlotLogs() tea.Cmd {
 	return func() tea.Msg {
-		status := m.proxyCtrl.GetStatus()
-
-		if status == proxy.StatusRunning {
-			err := m.proxyCtrl.Stop()
-			return proxyStatusMsg{status: proxy.StatusStopped, mode: ProxyModeDisconnect, err: err}
-		}
-
-		// Start proxy
-		nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
-		if len(nodes) == 0 {
-			return proxyStatusMsg{
-				status: proxy.StatusError,
-				mode:   m.proxyMode,
-				err:    fmt.Errorf("no nodes available"),
-			}
-		}
-		if m.selectedNode == nil {
-			return proxyStatusMsg{
-				status: proxy.StatusError,
-				mode:   m.proxyMode,
-				err:    fmt.Errorf("no node selected"),
-			}
-		}
-
-		err := m.proxyCtrl.Start(m.activeSubID, nodes, m.selectedNode)
-		if err != nil {
-			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
-		}
-
-		nodeName := ""
-		if m.selectedNode != nil {
-			nodeName = m.selectedNode.Name
-		}
-		return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, connectedNodeName: nodeName}
-	}
-}
-
-func (m *Model) cycleProxyMode() tea.Cmd {
-	nextMode := m.proxyMode.next()
-
-	return func() tea.Msg {
-		var connectedNodeName string
-
-		switch nextMode {
-		case ProxyModeDisconnect:
-			err := m.proxyCtrl.Stop()
-			return proxyStatusMsg{status: proxy.StatusStopped, mode: ProxyModeDisconnect, err: err}
-
-		case ProxyModeRule, ProxyModeGlobal:
-			// Ensure we have something to start with if proxy isn't running.
-			nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
-			if len(nodes) == 0 {
-				return overlayMsg{text: i18n.M().Nodes.NoNodes}
-			}
-			selectedNode := m.selectedNode
-			if selectedNode == nil {
-				selectedNode = &nodes[0]
-			}
-
-			wasRunning := m.proxyCtrl.GetStatus() == proxy.StatusRunning
-			if !wasRunning {
-				if err := m.proxyCtrl.Start(m.activeSubID, nodes, selectedNode); err != nil {
-					return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
-				}
-				connectedNodeName = selectedNode.Name
-			}
-
-			// Switch mihomo mode (rule/global). If we just started, the default is rule.
-			var target string
-			switch nextMode {
-			case ProxyModeRule:
-				target = "rule"
-			case ProxyModeGlobal:
-				target = "global"
-			}
-
-			if target != "" {
-				if err := m.proxyCtrl.SetMode(target); err != nil {
-					// If we just started and target is rule, we're already in rule mode.
-					if !wasRunning && nextMode == ProxyModeRule {
-						return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, connectedNodeName: connectedNodeName}
-					}
-					return proxyStatusMsg{status: proxy.StatusRunning, mode: m.proxyMode, err: err, connectedNodeName: connectedNodeName}
-				}
-			}
-
-			// In global mode, also try to align the GLOBAL group to the selected node.
-			// (Best-effort: even if this fails, the mode change itself may still succeed.)
-			if nextMode == ProxyModeGlobal {
-				if err := m.proxyCtrl.SwitchGroup("GLOBAL", selectedNode.Name); err != nil {
-					return proxyStatusMsg{status: proxy.StatusRunning, mode: nextMode, err: err, connectedNodeName: connectedNodeName}
-				}
-				connectedNodeName = selectedNode.Name
-			}
-
-			return proxyStatusMsg{status: proxy.StatusRunning, mode: nextMode, connectedNodeName: connectedNodeName}
-		default:
-			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: fmt.Errorf("unknown mode")}
-		}
-	}
-}
-
-func (m *Model) listenProxyLogs() tea.Cmd {
-	return func() tea.Msg {
-		logCh := m.proxyCtrl.LogChannel()
+		logCh := m.slotMgr.LogChannel()
 		for log := range logCh {
 			return log
 		}
@@ -1054,58 +1061,14 @@ func (m *Model) listenAppLogs() tea.Cmd {
 	}
 }
 
-// startProxy starts or restarts the proxy with current nodes and selected node
-func (m *Model) startProxy() tea.Cmd {
-	return func() tea.Msg {
-		// Stop existing proxy if running
-		status := m.proxyCtrl.GetStatus()
-		if status == proxy.StatusRunning || status == proxy.StatusStarting {
-			_ = m.proxyCtrl.Stop()
-			// Wait a bit for the process to exit
-			time.Sleep(500 * time.Millisecond)
-		}
+// -- Restart slot 0 (from settings) --
 
-		nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
-		if len(nodes) == 0 {
-			return proxyStatusMsg{
-				status: proxy.StatusError,
-				mode:   m.proxyMode,
-				err:    fmt.Errorf("no nodes available"),
-			}
-		}
-		if m.selectedNode == nil {
-			return proxyStatusMsg{
-				status: proxy.StatusError,
-				mode:   m.proxyMode,
-				err:    fmt.Errorf("no node selected"),
-			}
-		}
-
-		err := m.proxyCtrl.Start(m.activeSubID, nodes, m.selectedNode)
-		if err != nil {
-			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
-		}
-
-		nodeName := ""
-		if m.selectedNode != nil {
-			nodeName = m.selectedNode.Name
-		}
-		return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, connectedNodeName: nodeName}
-	}
-}
-
-func (m *Model) restartProxyCore() tea.Cmd {
-	desiredMode := m.proxyMode
-	if desiredMode == ProxyModeDisconnect {
-		desiredMode = ProxyModeRule
-	}
-
+func (m *Model) restartSlot0() tea.Cmd {
 	return func() tea.Msg {
 		nodes := m.subManager.GetNodesForSubscription(m.activeSubID)
 		if len(nodes) == 0 {
 			return overlayMsg{text: i18n.M().Nodes.NoNodes}
 		}
-
 		if m.selectedNode == nil {
 			msg := i18n.M().Errors.NoNodeSelected
 			if msg == "" {
@@ -1114,81 +1077,139 @@ func (m *Model) restartProxyCore() tea.Cmd {
 			return overlayMsg{text: fmt.Sprintf(msg, i18n.M().Tabs.Nodes)}
 		}
 
-		// Best-effort stop, then start with the same selected node.
-		_ = m.proxyCtrl.Stop()
+		_ = m.slotMgr.StopSlot(0)
 		time.Sleep(500 * time.Millisecond)
 
-		if err := m.proxyCtrl.Start(m.activeSubID, nodes, m.selectedNode); err != nil {
-			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
-		}
-
-		nodeName := m.selectedNode.Name
-
-		// Restore mode if needed (Start defaults to rule).
-		if desiredMode == ProxyModeGlobal {
-			var lastErr error
-			for i := 0; i < 50; i++ {
-				if err := m.proxyCtrl.SetMode("global"); err == nil {
-					lastErr = nil
-					break
-				} else {
-					lastErr = err
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
-			if lastErr != nil {
-				return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, err: lastErr, connectedNodeName: nodeName}
-			}
-			if err := m.proxyCtrl.SwitchGroup("GLOBAL", nodeName); err != nil {
-				return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeGlobal, err: err, connectedNodeName: nodeName}
-			}
-			return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeGlobal, connectedNodeName: nodeName}
-		}
-
-		return proxyStatusMsg{status: proxy.StatusRunning, mode: ProxyModeRule, connectedNodeName: nodeName}
+		err := m.slotMgr.StartSlot(0, m.activeSubID, nodes, m.selectedNode)
+		return slotActionDoneMsg{slotID: 0, err: err}
 	}
 }
 
-func (m *Model) switchNode(node *subscription.Node) tea.Cmd {
-	if node == nil {
-		return nil
-	}
-	nodeSnapshot := *node
-	subID := m.activeSubID
-	return func() tea.Msg {
-		nodeName := nodeSnapshot.Name
-		err := m.proxyCtrl.SwitchNode(nodeName)
-		if err != nil {
-			return proxyStatusMsg{status: proxy.StatusError, mode: m.proxyMode, err: err}
-		}
-		if m.proxyMode == ProxyModeGlobal {
-			if err := m.proxyCtrl.SwitchGroup("GLOBAL", nodeName); err != nil {
-				return proxyStatusMsg{status: proxy.StatusRunning, mode: m.proxyMode, err: err}
-			}
-		}
-		m.proxyCtrl.UpdateLockState(subID, &nodeSnapshot)
-		return proxyStatusMsg{status: proxy.StatusRunning, mode: m.proxyMode, connectedNodeName: nodeName}
-	}
-}
+// -- UI helpers --
 
-func proxyModeIcon(mode ProxyMode) string {
+func slotModeIcon(mode string) string {
 	switch mode {
-	case ProxyModeRule:
+	case "rule":
 		return "📜"
-	case ProxyModeGlobal:
+	case "global":
 		return "🌐"
 	default:
 		return ""
 	}
 }
 
-func (m *Model) disconnectProxy() {
-	if m.proxyCtrl != nil {
-		_ = m.proxyCtrl.Stop()
+func (m *Model) updateSlotIndicators() {
+	if m.nodesTab == nil {
+		return
 	}
-	m.proxyMode = ProxyModeDisconnect
-	m.connectedNodeName = ""
+	indicators := make(map[string]tabs.SlotIndicator)
+
+	// Prioritize active slots (running proxies)
+	activeSlots := m.slotMgr.ActiveSlots()
+	for _, s := range activeSlots {
+		if s.NodeName != "" && s.Mode != "" {
+			indicators[s.NodeName] = tabs.SlotIndicator{
+				SlotID: s.SlotID,
+				Icon:   slotModeIcon(s.Mode),
+			}
+		}
+	}
+
+	// If no active slots, use historical state (for UI display only)
+	if len(indicators) == 0 && m.cfg != nil && len(m.cfg.UI.SlotHistory) > 0 {
+		for _, h := range m.cfg.UI.SlotHistory {
+			if h.NodeName != "" && h.Mode != "" {
+				indicators[h.NodeName] = tabs.SlotIndicator{
+					SlotID: h.SlotID,
+					Icon:   slotModeIcon(h.Mode),
+				}
+			}
+		}
+	}
+
+	m.nodesTab.SetSlotIndicators(indicators)
+}
+
+func (m *Model) updateStatusBar() {
+	if m.statusBar == nil {
+		return
+	}
+	activeCount := m.slotMgr.ActiveSlotCount()
+	m.statusBar.SetActiveSlots(activeCount)
+	m.statusBar.SetMixedPort(m.slotMgr.Slot0Port())
+
+	if activeCount > 0 {
+		m.statusBar.SetProxyStatus(proxy.StatusRunning)
+		// Show mode of slot 0 (or first active slot)
+		state := m.slotMgr.GetSlotState(0)
+		if state == nil {
+			slots := m.slotMgr.ActiveSlots()
+			if len(slots) > 0 {
+				state = slots[0]
+			}
+		}
+		if state != nil {
+			switch state.Mode {
+			case "rule":
+				m.statusBar.SetProxyMode("Rule")
+			case "global":
+				m.statusBar.SetProxyMode("Global")
+			default:
+				m.statusBar.SetProxyMode("Disconnect")
+			}
+		}
+	} else {
+		m.statusBar.SetProxyStatus(proxy.StatusStopped)
+		m.statusBar.SetProxyMode("Disconnect")
+	}
+}
+
+func (m *Model) switchSubscription(delta int) tea.Cmd {
+	subs := m.subManager.List()
+	if len(subs) <= 1 {
+		return nil
+	}
+
+	currentIdx := -1
+	for i, sub := range subs {
+		if sub != nil && sub.ID == m.activeSubID {
+			currentIdx = i
+			break
+		}
+	}
+
+	nextIdx := (currentIdx + delta + len(subs)) % len(subs)
+	newSub := subs[nextIdx]
+	if newSub == nil || newSub.ID == m.activeSubID {
+		return nil
+	}
+
+	// NOTE: Do NOT disconnect running slots — slots from other subscriptions keep running.
+	m.activeSubID = newSub.ID
+	m.subTabIdx = nextIdx
 	if m.nodesTab != nil {
-		m.nodesTab.SetConnectionIndicator("", "")
+		m.nodesTab.SetSubscriptionID(m.activeSubID)
+	}
+	if m.subsTab != nil {
+		m.subsTab.SetActiveSubscription(m.activeSubID)
+	}
+
+	return tea.Batch(
+		m.persistActiveSubscription(m.activeSubID),
+		m.nodesTab.Init(),
+	)
+}
+
+func (m *Model) disconnectAllSlots() {
+	if m.slotMgr != nil {
+		m.slotMgr.StopAll()
+	}
+	if m.nodesTab != nil {
+		m.nodesTab.SetSlotIndicators(nil)
+	}
+	m.slotTrafficLast = make(map[int]trafficSnapshot)
+	if m.statusBar != nil {
+		m.statusBar.ClearTraffic()
+		m.statusBar.SetActiveSlots(0)
 	}
 }

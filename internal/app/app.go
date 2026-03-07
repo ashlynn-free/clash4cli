@@ -26,7 +26,7 @@ type App struct {
 	cfg         *config.Config
 	subManager  *subscription.Manager
 	nodeMgr     *node.Manager
-	proxyCtrl   *proxy.Controller
+	slotMgr     *proxy.SlotManager
 	lock        *instanceLock
 	version     string
 	startupWarn string
@@ -78,23 +78,23 @@ func New(version string) (*App, error) {
 	}
 
 	nodeMgr := node.NewManager(subManager, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
-	proxyCtrl := proxy.NewController(cfg)
+	slotMgr := proxy.NewSlotManager(cfg)
 	subManager.SetUpdateViaProxy(cfg.Subscription.UpdateViaProxy)
 	subManager.SetProxyProvider(func() (*url.URL, error) {
-		lock, err := proxy.ReadLockFile()
-		if err != nil || lock == nil {
-			return nil, nil
+		// Use slot 0 (or first active slot) for subscription updates via proxy.
+		state := slotMgr.GetSlotState(0)
+		if state == nil {
+			slots := slotMgr.ActiveSlots()
+			if len(slots) > 0 {
+				state = slots[0]
+			}
 		}
-		if lock.Port <= 0 || lock.Port >= 65536 {
+		if state == nil || state.Port <= 0 || state.Port >= 65536 {
 			return nil, nil
-		}
-		host := lock.ProxyHost
-		if strings.TrimSpace(host) == "" {
-			host = "127.0.0.1"
 		}
 		return &url.URL{
 			Scheme: "http",
-			Host:   net.JoinHostPort(host, strconv.Itoa(lock.Port)),
+			Host:   net.JoinHostPort("127.0.0.1", strconv.Itoa(state.Port)),
 		}, nil
 	})
 
@@ -115,7 +115,7 @@ func New(version string) (*App, error) {
 		cfg:         cfg,
 		subManager:  subManager,
 		nodeMgr:     nodeMgr,
-		proxyCtrl:   proxyCtrl,
+		slotMgr:     slotMgr,
 		lock:        lock,
 		version:     version,
 		startupWarn: startupWarn,
@@ -145,12 +145,11 @@ func (a *App) Run() error {
 		}
 	}
 
-	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.proxyCtrl, a.version, a.startupWarn)
+	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.slotMgr, a.version, a.startupWarn)
 
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 
 	_, err := p.Run()
