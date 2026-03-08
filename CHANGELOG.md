@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## v0.5.0 - 2026-03-08
+
+### Changed
+- c4cgo slot listing now shows proxy mode emoji (📜 rule / 🌐 global) by querying the mihomo API, consistent with the TUI display.
+- c4cgo slot listing format improved to: `📜 Slot 0  ● running at 17890, google-node(MySub)`.
+
 ## v0.4.0 - 2026-03-08
 
 ### Changed

@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -254,6 +256,46 @@ Note: Make sure c4c is running and a node is selected.
 `, Version)
 }
 
+// queryMihomoMode queries the mihomo API for the current proxy mode (rule/global/direct).
+func queryMihomoMode(lf proxy.LockFile) string {
+	host := lf.APIHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	url := fmt.Sprintf("http://%s:%d/configs", host, lf.APIPort)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return ""
+	}
+	if lf.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+lf.Secret)
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ""
+	}
+	return strings.ToLower(result.Mode)
+}
+
+// modeEmoji returns the emoji representation for a mihomo proxy mode.
+func modeEmoji(mode string) string {
+	switch mode {
+	case "rule":
+		return "📜"
+	case "global":
+		return "🌐"
+	default:
+		return "  "
+	}
+}
+
 func listSlots() {
 	mlf, err := proxy.ReadMultiLockFile()
 	if err != nil {
@@ -287,9 +329,11 @@ func listSlots() {
 				node = "-"
 			}
 			subName := subscriptionDisplayName(subNames, lf.SubID)
-			fmt.Printf("  Slot %d  \033[32m●\033[0m running  port:%-6d node:%-20s sub:%s\n", i, lf.Port, node, subName)
+			mode := queryMihomoMode(lf)
+			emoji := modeEmoji(mode)
+			fmt.Printf("  %s Slot %d  \033[32m●\033[0m running at %d, %s(%s)\n", emoji, i, lf.Port, node, subName)
 		} else {
-			fmt.Printf("  Slot %d  \033[90m○\033[0m empty\n", i)
+			fmt.Printf("     Slot %d  \033[90m○\033[0m empty\n", i)
 		}
 	}
 }
