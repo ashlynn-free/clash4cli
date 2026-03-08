@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## v0.6.0 - 2026-03-08
+
+### Changed
+- c4cgo now defaults to quiet output; use `-v`/`--verbose` to show detailed proxy info (version, mode, binary path, proxy address).
+- c4cgo proxychains4 mode now displays the binary path when verbose is enabled.
+- `--version` flag no longer has a `-v` short form; `-v` is now `--verbose`.
+
 ## v0.5.0 - 2026-03-08
 
 ### Changed

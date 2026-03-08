@@ -27,7 +27,7 @@ var (
 )
 
 var (
-	quietMode     = false
+	verboseMode   = false
 	specifiedPort = 0
 	specifiedSlot = -1 // -1 means auto-detect (first active slot)
 	runMode       = "auto" // auto|proxychains|env
@@ -39,15 +39,15 @@ func main() {
 	// Handle flags
 	for len(args) > 0 {
 		switch args[0] {
-		case "-v", "--version":
+		case "--version":
 			fmt.Printf("c4cgo %s\n", Version)
 			fmt.Printf("Build time: %s\n", BuildTime)
 			return
 		case "-h", "--help":
 			printUsage()
 			return
-		case "-q", "--quiet":
-			quietMode = true
+		case "-v", "--verbose":
+			verboseMode = true
 			args = args[1:]
 		case "--mode":
 			if len(args) < 2 {
@@ -139,7 +139,8 @@ runCommand:
 			proxyHost = lockFile.ProxyHost
 		}
 
-		if !quietMode {
+		if verboseMode {
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] c4cgo %s\033[0m\n", Version)
 			slotInfo := ""
 			if len(mlf.Instances) > 1 || specifiedSlot >= 0 {
 				slotInfo = fmt.Sprintf(" slot:%d", slotID)
@@ -177,7 +178,7 @@ runCommand:
 		if useProxychains && runtime.GOOS == "darwin" {
 			if cmdPath, err := exec.LookPath(args[0]); err == nil && isSIPProtectedDarwinPath(cmdPath) {
 				useProxychains = false
-				if !quietMode {
+				if verboseMode {
 					fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] macOS SIP may block proxychains for system binaries: %s\033[0m\n", cmdPath)
 					fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Falling back to: environment variables (HTTP_PROXY/ALL_PROXY)\033[0m\n")
 					fmt.Fprintf(os.Stderr, "\033[90m       Tip: install a non-system build of this command (e.g. Homebrew) or run with --mode proxychains.\033[0m\n")
@@ -187,15 +188,16 @@ runCommand:
 	}
 
 	if useProxychains {
-		if !quietMode {
+		if verboseMode {
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Mode: proxychains4\033[0m\n")
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Binary: %s\033[0m\n", proxychains)
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Proxy: socks5://%s:%d\033[0m\n", proxyHost, port)
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Command: %s\033[0m\n", args[0])
 			fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
 		}
 		exitCode, stderr, err := runWithProxychains(proxychains, libPath, proxyHost, port, args)
 		if err != nil && runMode == "auto" && shouldFallbackToEnv(stderr) {
-			if !quietMode {
+			if verboseMode {
 				fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] proxychains failed on this system; falling back to environment variables\033[0m\n")
 				fmt.Fprintf(os.Stderr, "\033[90m       Tip: rebuild proxychains on the target machine, or run with --mode env\033[0m\n")
 				fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
@@ -206,7 +208,7 @@ runCommand:
 	}
 
 	// Fallback to environment variables
-	if !quietMode {
+	if verboseMode {
 		switch runMode {
 		case "env":
 			fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables\033[0m\n")
@@ -239,8 +241,8 @@ Options:
   -s, --slot N   Use proxy from slot N (0-9, default: first active slot)
   --port PORT    Specify proxy port (default: read from ~/.clash4cli/proxy.lock)
   --mode MODE    Run mode: auto|proxychains|env (default: auto)
-  -q, --quiet    Suppress status messages (only show command output)
-  -v, --version  Show version
+  -v, --verbose  Show detailed status messages before running command
+  --version      Show version
   -h, --help     Show this help
 
 Examples:
@@ -250,7 +252,7 @@ Examples:
   c4cgo --port 17890 wget https://example.com/file.zip
   c4cgo --mode env curl https://ip.sb
   c4cgo git clone https://github.com/user/repo.git
-  c4cgo -q curl -s https://ip.sb > myip.txt
+  c4cgo -v curl https://ip.sb                        Show proxy details
 
 Note: Make sure c4c is running and a node is selected.
 `, Version)
