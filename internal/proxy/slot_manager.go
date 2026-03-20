@@ -15,13 +15,17 @@ const MaxSlots = 10
 
 // SlotState describes the runtime state of a single proxy slot.
 type SlotState struct {
-	SlotID   int
-	Mode     string // "rule", "global", "" (stopped)
-	NodeName string
-	SubID    string
-	Port     int
-	APIPort  int
-	PID      int
+	SlotID           int
+	Mode             string // "rule", "global", "" (stopped)
+	NodeName         string
+	SubID            string
+	Port             int
+	APIPort          int
+	PID              int
+	UpstreamEnabled  bool
+	UpstreamProtocol string
+	UpstreamServer   string
+	UpstreamPort     int
 }
 
 // SlotManager manages up to 10 concurrent proxy instances.
@@ -29,10 +33,10 @@ type SlotManager struct {
 	mu         sync.RWMutex
 	cfg        *config.Config
 	slots      [MaxSlots]*SlotController
-	slotModes  [MaxSlots]string       // "rule", "global", "" (stopped)
-	slotNodes  [MaxSlots]string       // node name per slot
-	slotSubIDs [MaxSlots]string       // subscription ID per slot
-	nodeToSlot map[string]int         // node name → slot index
+	slotModes  [MaxSlots]string // "rule", "global", "" (stopped)
+	slotNodes  [MaxSlots]string // node name per slot
+	slotSubIDs [MaxSlots]string // subscription ID per slot
+	nodeToSlot map[string]int   // node name → slot index
 	logCh      chan LogEntry
 	// Callback to save slot history to config
 	saveHistoryFunc func(h []config.SlotHistoryEntry)
@@ -146,7 +150,12 @@ func (sm *SlotManager) SetSlotMode(slotID int, mode string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("slot %d is not running", slotID)
 	}
-	nodeName := sm.slotNodes[slotID]
+	sc.ctrl.mu.RLock()
+	effectiveName := sm.slotNodes[slotID]
+	if sc.ctrl.upstreamEnabled {
+		effectiveName = sc.ctrl.effectiveProxy
+	}
+	sc.ctrl.mu.RUnlock()
 	sm.mu.Unlock()
 
 	if err := sc.SetMode(mode); err != nil {
@@ -154,8 +163,8 @@ func (sm *SlotManager) SetSlotMode(slotID int, mode string) error {
 	}
 
 	// In global mode, also align the GLOBAL group to the selected node.
-	if mode == "global" && nodeName != "" {
-		_ = sc.SwitchGroup("GLOBAL", nodeName)
+	if mode == "global" && effectiveName != "" {
+		_ = sc.SwitchGroup("GLOBAL", effectiveName)
 	}
 
 	sm.mu.Lock()
@@ -211,15 +220,21 @@ func (sm *SlotManager) GetSlotState(slotID int) *SlotState {
 	if sc == nil {
 		return nil
 	}
+	sc.ctrl.mu.RLock()
+	defer sc.ctrl.mu.RUnlock()
 
 	return &SlotState{
-		SlotID:   slotID,
-		Mode:     sm.slotModes[slotID],
-		NodeName: sm.slotNodes[slotID],
-		SubID:    sm.slotSubIDs[slotID],
-		Port:     sc.CurrentPort(),
-		APIPort:  sc.APIPort(),
-		PID:      sc.PID(),
+		SlotID:           slotID,
+		Mode:             sm.slotModes[slotID],
+		NodeName:         sm.slotNodes[slotID],
+		SubID:            sm.slotSubIDs[slotID],
+		Port:             sc.ctrl.port,
+		APIPort:          sc.ctrl.apiPort,
+		PID:              sc.ctrl.pid,
+		UpstreamEnabled:  sc.ctrl.upstreamEnabled,
+		UpstreamProtocol: sc.ctrl.upstreamProtocol,
+		UpstreamServer:   sc.ctrl.upstreamServer,
+		UpstreamPort:     sc.ctrl.upstreamPort,
 	}
 }
 
@@ -248,6 +263,56 @@ func (sm *SlotManager) GetTrafficForSlot(slotID int) (int64, int64, error) {
 	return sc.GetTrafficTotals()
 }
 
+// GetCoreVersion returns the mihomo core version for a slot.
+func (sm *SlotManager) GetCoreVersion(slotID int) (string, error) {
+	if slotID < 0 || slotID >= MaxSlots {
+		return "", fmt.Errorf("invalid slot ID: %d", slotID)
+	}
+
+	sm.mu.RLock()
+	sc := sm.slots[slotID]
+	sm.mu.RUnlock()
+
+	if sc == nil {
+		return "", fmt.Errorf("slot %d is not running", slotID)
+	}
+
+	return sc.GetCoreVersion()
+}
+
+// GetRulesCount returns the number of rules loaded for a slot.
+func (sm *SlotManager) GetRulesCount(slotID int) (int, error) {
+	if slotID < 0 || slotID >= MaxSlots {
+		return 0, fmt.Errorf("invalid slot ID: %d", slotID)
+	}
+
+	sm.mu.RLock()
+	sc := sm.slots[slotID]
+	sm.mu.RUnlock()
+
+	if sc == nil {
+		return 0, fmt.Errorf("slot %d is not running", slotID)
+	}
+
+	return sc.GetRulesCount()
+}
+
+// GetStartedAt returns the StartedAt timestamp for a slot from the lock file.
+func (sm *SlotManager) GetStartedAt(slotID int) (string, error) {
+	mlf, err := ReadMultiLockFile()
+	if err != nil {
+		return "", err
+	}
+	if mlf == nil {
+		return "", fmt.Errorf("no lock file found")
+	}
+	lock, ok := mlf.Instances[slotID]
+	if !ok {
+		return "", fmt.Errorf("slot %d not found in lock file", slotID)
+	}
+	return lock.StartedAt, nil
+}
+
 // ActiveSlots returns a list of active slot states.
 func (sm *SlotManager) ActiveSlots() []*SlotState {
 	sm.mu.RLock()
@@ -256,15 +321,21 @@ func (sm *SlotManager) ActiveSlots() []*SlotState {
 	var states []*SlotState
 	for i := 0; i < MaxSlots; i++ {
 		if sm.slots[i] != nil && sm.slots[i].GetStatus() == StatusRunning {
+			sm.slots[i].ctrl.mu.RLock()
 			states = append(states, &SlotState{
-				SlotID:   i,
-				Mode:     sm.slotModes[i],
-				NodeName: sm.slotNodes[i],
-				SubID:    sm.slotSubIDs[i],
-				Port:     sm.slots[i].CurrentPort(),
-				APIPort:  sm.slots[i].APIPort(),
-				PID:      sm.slots[i].PID(),
+				SlotID:           i,
+				Mode:             sm.slotModes[i],
+				NodeName:         sm.slotNodes[i],
+				SubID:            sm.slotSubIDs[i],
+				Port:             sm.slots[i].ctrl.port,
+				APIPort:          sm.slots[i].ctrl.apiPort,
+				PID:              sm.slots[i].ctrl.pid,
+				UpstreamEnabled:  sm.slots[i].ctrl.upstreamEnabled,
+				UpstreamProtocol: sm.slots[i].ctrl.upstreamProtocol,
+				UpstreamServer:   sm.slots[i].ctrl.upstreamServer,
+				UpstreamPort:     sm.slots[i].ctrl.upstreamPort,
 			})
+			sm.slots[i].ctrl.mu.RUnlock()
 		}
 	}
 	return states
@@ -446,18 +517,23 @@ func (sm *SlotManager) writeLockFileLocked() {
 		}
 		sc.ctrl.mu.RLock()
 		lock := LockFile{
-			Port:       sc.ctrl.port,
-			APIPort:    sc.ctrl.apiPort,
-			PID:        sc.ctrl.pid,
-			SubID:      sm.slotSubIDs[i],
-			Node:       sm.slotNodes[i],
-			ProxyHost:  sc.ctrl.proxyHost,
-			APIHost:    sc.ctrl.apiHost,
-			ConfigPath: sc.ctrl.configPath,
-			LogPath:    sc.ctrl.logPath,
-			Secret:     sc.ctrl.secret,
-			StartedAt:  time.Now().UTC().Format(time.RFC3339),
-			Detached:   true,
+			Port:             sc.ctrl.port,
+			APIPort:          sc.ctrl.apiPort,
+			PID:              sc.ctrl.pid,
+			SubID:            sm.slotSubIDs[i],
+			Node:             sm.slotNodes[i],
+			ProxyHost:        sc.ctrl.proxyHost,
+			APIHost:          sc.ctrl.apiHost,
+			ConfigPath:       sc.ctrl.configPath,
+			LogPath:          sc.ctrl.logPath,
+			Secret:           sc.ctrl.secret,
+			StartedAt:        time.Now().UTC().Format(time.RFC3339),
+			Detached:         true,
+			EffectiveProxy:   sc.ctrl.effectiveProxy,
+			UpstreamEnabled:  sc.ctrl.upstreamEnabled,
+			UpstreamProtocol: sc.ctrl.upstreamProtocol,
+			UpstreamServer:   sc.ctrl.upstreamServer,
+			UpstreamPort:     sc.ctrl.upstreamPort,
 		}
 		sc.ctrl.mu.RUnlock()
 		mlf.Instances[i] = lock

@@ -6,16 +6,18 @@ import (
 	"sync"
 	"time"
 
+	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 )
 
 // Manager manages nodes and their test results
 type Manager struct {
-	subManager  *subscription.Manager
-	speedTester *SpeedTester
-	results     map[string]*TestResult // key: server:port
-	mu          sync.RWMutex
-	selected    *subscription.Node
+	subManager        *subscription.Manager
+	speedTester       *SpeedTester
+	results           map[string]*TestResult // key: server:port
+	mu                sync.RWMutex
+	selected          *subscription.Node
+	probeLockProvider func(*subscription.Node) *proxy.LockFile
 }
 
 // NewManager creates a new node manager
@@ -32,6 +34,25 @@ func NewManager(subMgr *subscription.Manager, concurrent int, timeout time.Durat
 		speedTester: NewSpeedTester(opts, timeout),
 		results:     make(map[string]*TestResult),
 	}
+}
+
+// SetProbeLockProvider resolves a running slot lock for a node, when available.
+func (m *Manager) SetProbeLockProvider(provider func(*subscription.Node) *proxy.LockFile) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.probeLockProvider = provider
+	m.speedTester.SetProbeLockProvider(provider)
+}
+
+// GetProbeLock returns the current running slot lock for a node, if any.
+func (m *Manager) GetProbeLock(node *subscription.Node) *proxy.LockFile {
+	m.mu.RLock()
+	provider := m.probeLockProvider
+	m.mu.RUnlock()
+	if provider == nil || node == nil {
+		return nil
+	}
+	return provider(node)
 }
 
 // GetNodes returns all nodes from all subscriptions

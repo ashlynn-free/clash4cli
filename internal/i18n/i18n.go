@@ -16,6 +16,7 @@ type Messages struct {
 	App          AppMessages          `yaml:"app"`
 	Tabs         TabMessages          `yaml:"tabs"`
 	Nodes        NodeMessages         `yaml:"nodes"`
+	NodeDetail   NodeDetailMessages   `yaml:"node_detail"`
 	Subscription SubscriptionMessages `yaml:"subscription"`
 	Settings     SettingsMessages     `yaml:"settings"`
 	Logs         LogMessages          `yaml:"logs"`
@@ -51,6 +52,16 @@ type NodeMessages struct {
 	Connected string `yaml:"connected"`
 	Timeout   string `yaml:"timeout"`
 	Unknown   string `yaml:"unknown"`
+}
+
+type NodeDetailMessages struct {
+	Title        string `yaml:"title"`
+	Server       string `yaml:"server"`
+	Settings     string `yaml:"settings"`
+	WebsiteTests string `yaml:"website_tests"`
+	Testing      string `yaml:"testing"`
+	NotTested    string `yaml:"not_tested"`
+	NoProxy      string `yaml:"no_proxy"`
 }
 
 type SubscriptionMessages struct {

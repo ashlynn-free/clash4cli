@@ -24,6 +24,15 @@ nodes:
   timeout: "Zaman aşımı"
   unknown: "Bilinmiyor"
 
+node_detail:
+  title: "Düğüm Detayı"
+  server: "Sunucu"
+  settings: "Ayarlar"
+  website_tests: "Web Sitesi Testleri"
+  testing: "Test ediliyor..."
+  not_tested: "Test edilmedi"
+  no_proxy: "Aktif proxy yuvası yok"
+
 subscription:
   name: "Ad"
   url: "URL"

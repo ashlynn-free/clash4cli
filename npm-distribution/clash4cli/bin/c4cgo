@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+"use strict";
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+
+const PLATFORM_MAP = {
+  "darwin-arm64": "@clash4cli/darwin-arm64",
+  "darwin-x64": "@clash4cli/darwin-x64",
+  "linux-arm64": "@clash4cli/linux-arm64",
+  "linux-x64": "@clash4cli/linux-x64",
+};
+
+const key = `${process.platform}-${process.arch}`;
+const pkg = PLATFORM_MAP[key];
+
+if (!pkg) {
+  console.error(`Unsupported platform: ${key}`);
+  console.error(`clash4cli supports: ${Object.keys(PLATFORM_MAP).join(", ")}`);
+  process.exit(1);
+}
+
+let binPath;
+try {
+  binPath = path.join(require.resolve(`${pkg}/package.json`), "..", "c4cgo");
+} catch {
+  console.error(`Could not find the platform package "${pkg}".`);
+  console.error("Make sure optional dependencies were installed correctly.");
+  console.error("Try: npm install -g clash4cli --include=optional");
+  process.exit(1);
+}
+
+const result = require("child_process").spawnSync(binPath, process.argv.slice(2), {
+  stdio: "inherit",
+});
+
+process.exit(result.status ?? 1);

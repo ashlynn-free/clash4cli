@@ -24,6 +24,15 @@ nodes:
   timeout: "Timeout"
   unknown: "Tidak diketahui"
 
+node_detail:
+  title: "Detail Node"
+  server: "Server"
+  settings: "Pengaturan"
+  website_tests: "Tes Situs Web"
+  testing: "Menguji..."
+  not_tested: "Belum diuji"
+  no_proxy: "Tidak ada slot proxy aktif"
+
 subscription:
   name: "Nama"
   url: "URL"

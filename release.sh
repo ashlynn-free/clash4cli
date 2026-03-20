@@ -222,6 +222,17 @@ main() {
   fi
 
   echo "Release published: ${repo} ${tag}"
+
+  # npm publish (optional: only if NPM_TOKEN is set)
+  if [[ -n "${NPM_TOKEN:-}" ]]; then
+    echo ""
+    echo "=== Publishing to npm ==="
+    bash "$script_dir/scripts/npm_assemble.sh"
+    bash "$script_dir/scripts/npm_publish.sh"
+  else
+    echo ""
+    echo "Skipping npm publish (NPM_TOKEN not set)."
+  fi
 }
 
 main "$@"

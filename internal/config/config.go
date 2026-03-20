@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Proxy        ProxyConfig        `yaml:"proxy"`
 	Subscription SubscriptionConfig `yaml:"subscription"`
+	Slots        []SlotConfig       `yaml:"slots,omitempty"`
 	Language     string             `yaml:"language"`
 	SpeedTest    SpeedTestConfig    `yaml:"speedtest"`
 	UI           UIConfig           `yaml:"ui"`
@@ -19,12 +20,12 @@ type Config struct {
 
 // ProxyConfig represents proxy port configuration
 type ProxyConfig struct {
-	MixedPort    int    `yaml:"mixed_port"`     // Single port for both SOCKS5 and HTTP
-	BaseMixedPort int   `yaml:"base_mixed_port"` // Base mixed port for multi-instance offset
-	BaseAPIPort  int    `yaml:"base_api_port"`   // Base API port for multi-instance offset
-	AllowLan     bool   `yaml:"allow_lan"`
-	BindAddress  string `yaml:"bind_address"`
-	TunEnabled   bool   `yaml:"tun_enabled"`
+	MixedPort     int    `yaml:"mixed_port"`      // Single port for both SOCKS5 and HTTP
+	BaseMixedPort int    `yaml:"base_mixed_port"` // Base mixed port for multi-instance offset
+	BaseAPIPort   int    `yaml:"base_api_port"`   // Base API port for multi-instance offset
+	AllowLan      bool   `yaml:"allow_lan"`
+	BindAddress   string `yaml:"bind_address"`
+	TunEnabled    bool   `yaml:"tun_enabled"`
 	// DockerRedirectTCP redirects Docker container TCP traffic (internet-bound) to mihomo redir-port via iptables.
 	// Linux only; requires root to apply iptables rules.
 	DockerRedirectTCP bool `yaml:"docker_redirect_tcp"`
@@ -34,6 +35,22 @@ type ProxyConfig struct {
 type SubscriptionConfig struct {
 	// UpdateViaProxy controls whether URL subscriptions are fetched via the local proxy core (if running).
 	UpdateViaProxy bool `yaml:"update_via_proxy"`
+}
+
+// SlotConfig stores per-slot persisted settings.
+type SlotConfig struct {
+	ID       int                 `yaml:"id"`
+	Upstream UpstreamProxyConfig `yaml:"upstream,omitempty"`
+}
+
+// UpstreamProxyConfig describes an optional upstream HTTP/HTTPS/SOCKS5 proxy.
+type UpstreamProxyConfig struct {
+	Enabled  bool   `yaml:"enabled,omitempty"`
+	Protocol string `yaml:"protocol,omitempty"`
+	Server   string `yaml:"server,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
 }
 
 // SpeedTestConfig represents speed test configuration
@@ -116,6 +133,7 @@ func Load() (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.normalizeSlots()
 
 	return cfg, nil
 }
@@ -132,6 +150,7 @@ func (c *Config) Save() error {
 	}
 
 	configPath := filepath.Join(configDir, "config.yaml")
+	c.normalizeSlots()
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return err

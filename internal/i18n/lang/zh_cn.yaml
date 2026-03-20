@@ -24,6 +24,15 @@ nodes:
   timeout: "超时"
   unknown: "未知"
 
+node_detail:
+  title: "节点详情"
+  server: "服务器"
+  settings: "设置"
+  website_tests: "网站测试"
+  testing: "测试中..."
+  not_tested: "未测试"
+  no_proxy: "没有活跃的代理槽"
+
 subscription:
   name: "名称"
   url: "链接"

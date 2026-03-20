@@ -17,9 +17,10 @@ import (
 
 // SpeedTester handles node speed testing
 type SpeedTester struct {
-	options   SpeedTestOptions
-	timeout   time.Duration
-	proxyPort int // Local proxy port (mihomo mixed port)
+	options           SpeedTestOptions
+	timeout           time.Duration
+	proxyPort         int // Local proxy port (mihomo mixed port)
+	probeLockProvider func(*subscription.Node) *proxy.LockFile
 }
 
 // NewSpeedTester creates a new speed tester
@@ -34,6 +35,11 @@ func NewSpeedTester(opts SpeedTestOptions, timeout time.Duration) *SpeedTester {
 // SetProxyPort sets the local proxy port for testing
 func (st *SpeedTester) SetProxyPort(port int) {
 	st.proxyPort = port
+}
+
+// SetProbeLockProvider resolves the active slot lock used for node-aware probing.
+func (st *SpeedTester) SetProbeLockProvider(provider func(*subscription.Node) *proxy.LockFile) {
+	st.probeLockProvider = provider
 }
 
 // TestAll tests all nodes concurrently and returns results through channel
@@ -106,11 +112,15 @@ func (st *SpeedTester) TestNode(ctx context.Context, node *subscription.Node) Te
 // testLatency measures latency by using mihomo API to test the specific node
 // This tests the actual usable latency through the proxy node to google.com
 func (st *SpeedTester) testLatency(ctx context.Context, node *subscription.Node) (int64, error) {
-	// Use mihomo's built-in delay test API
-	// This tests each node individually through the proxy to google.com
-	latency, err := st.testLatencyViaMihomoAPI(ctx, node)
-	if err == nil {
-		return latency, nil
+	lock := st.probeLock(node)
+	if lock != nil {
+		latency, err := st.testLatencyViaMihomoAPI(ctx, node, lock)
+		if err == nil {
+			return latency, nil
+		}
+		if lock.UpstreamEnabled {
+			return -1, err
+		}
 	}
 
 	// Fallback: Test direct TCP connection to the node server
@@ -125,23 +135,25 @@ type MihomoDelayResponse struct {
 
 // testLatencyViaMihomoAPI tests latency using mihomo's RESTful API
 // This calls mihomo's /proxies/:name/delay endpoint which tests the specific node
-func (st *SpeedTester) testLatencyViaMihomoAPI(ctx context.Context, node *subscription.Node) (int64, error) {
-	// Prefer the running clash4cli core endpoint (dynamic + secret-protected).
-	apiHost := "127.0.0.1"
-	apiPort := 9090
-	apiSecret := ""
-
-	if lock, err := proxy.ReadLockFile(); err == nil && lock != nil && lock.APIPort > 0 {
-		if lock.APIHost != "" {
-			apiHost = lock.APIHost
-		}
-		apiPort = lock.APIPort
-		apiSecret = lock.Secret
+func (st *SpeedTester) testLatencyViaMihomoAPI(ctx context.Context, node *subscription.Node, lock *proxy.LockFile) (int64, error) {
+	if lock == nil || lock.APIPort <= 0 {
+		return -1, fmt.Errorf("no running slot for node %q", node.Name)
 	}
+
+	apiHost := "127.0.0.1"
+	if lock.APIHost != "" {
+		apiHost = lock.APIHost
+	}
+	apiPort := lock.APIPort
+	apiSecret := lock.Secret
 	apiBase := fmt.Sprintf("http://%s:%d", apiHost, apiPort)
 
 	// URL encode the node name for the API call
-	encodedName := url.PathEscape(node.Name)
+	targetName := node.Name
+	if lock.EffectiveProxy != "" {
+		targetName = lock.EffectiveProxy
+	}
+	encodedName := url.PathEscape(targetName)
 
 	// Test URL - use Google's generate_204 endpoint
 	testURL := url.QueryEscape("http://www.gstatic.com/generate_204")
@@ -189,6 +201,13 @@ func (st *SpeedTester) testLatencyViaMihomoAPI(ctx context.Context, node *subscr
 	}
 
 	return int64(delayResp.Delay), nil
+}
+
+func (st *SpeedTester) probeLock(node *subscription.Node) *proxy.LockFile {
+	if st.probeLockProvider == nil || node == nil {
+		return nil
+	}
+	return st.probeLockProvider(node)
 }
 
 // testLatencyDirect measures direct TCP connection latency to node server

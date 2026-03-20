@@ -29,7 +29,7 @@ var (
 var (
 	verboseMode   = false
 	specifiedPort = 0
-	specifiedSlot = -1 // -1 means auto-detect (first active slot)
+	specifiedSlot = -1     // -1 means auto-detect (first active slot)
 	runMode       = "auto" // auto|proxychains|env
 )
 
@@ -145,7 +145,7 @@ runCommand:
 			if len(mlf.Instances) > 1 || specifiedSlot >= 0 {
 				slotInfo = fmt.Sprintf(" slot:%d", slotID)
 			}
-			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Using proxy at %s:%d (node: %s%s)\033[0m\n", proxyHost, port, lockFile.Node, slotInfo)
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Using proxy at %s:%d (%s%s)\033[0m\n", proxyHost, port, verboseChainSummary(lockFile), slotInfo)
 		}
 	}
 
@@ -326,14 +326,10 @@ func listSlots() {
 
 	for i := 0; i < 10; i++ {
 		if lf, ok := mlf.Instances[i]; ok && activeSet[i] {
-			node := lf.Node
-			if node == "" {
-				node = "-"
-			}
 			subName := subscriptionDisplayName(subNames, lf.SubID)
 			mode := queryMihomoMode(lf)
 			emoji := modeEmoji(mode)
-			fmt.Printf("  %s Slot %d  \033[32m●\033[0m running at %d, %s(%s)\n", emoji, i, lf.Port, node, subName)
+			fmt.Printf("  %s Slot %d  \033[32m●\033[0m running at %d, %s (%s)\n", emoji, i, lf.Port, listChainSummary(lf), subName)
 		} else {
 			fmt.Printf("     Slot %d  \033[90m○\033[0m empty\n", i)
 		}
@@ -365,6 +361,43 @@ func subscriptionDisplayName(subNames map[string]string, subID string) string {
 	return subID
 }
 
+func verboseChainSummary(lf proxy.LockFile) string {
+	if lf.UpstreamEnabled {
+		return fmt.Sprintf("chain: %s -> %s", firstNonEmpty(lf.Node, "-"), upstreamEndpoint(lf))
+	}
+	return fmt.Sprintf("node: %s", firstNonEmpty(lf.Node, "-"))
+}
+
+func listChainSummary(lf proxy.LockFile) string {
+	if lf.UpstreamEnabled {
+		return fmt.Sprintf("%s -> %s", firstNonEmpty(lf.Node, "-"), upstreamEndpoint(lf))
+	}
+	return firstNonEmpty(lf.Node, "-")
+}
+
+func upstreamEndpoint(lf proxy.LockFile) string {
+	protocol := strings.TrimSpace(lf.UpstreamProtocol)
+	if protocol == "" {
+		protocol = "proxy"
+	}
+	host := strings.TrimSpace(lf.UpstreamServer)
+	if host == "" {
+		host = "-"
+	}
+	if lf.UpstreamPort > 0 {
+		return fmt.Sprintf("%s://%s:%d", protocol, host, lf.UpstreamPort)
+	}
+	return fmt.Sprintf("%s://%s", protocol, host)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
 
 func verifyProxy(host string, port int) bool {
 	if host == "" {

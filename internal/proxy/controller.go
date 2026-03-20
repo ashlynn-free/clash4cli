@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,11 @@ type LockFile struct {
 	Secret            string `json:"secret,omitempty"`
 	StartedAt         string `json:"started_at,omitempty"`
 	Detached          bool   `json:"detached,omitempty"`
+	EffectiveProxy    string `json:"effective_proxy,omitempty"`
+	UpstreamEnabled   bool   `json:"upstream_enabled,omitempty"`
+	UpstreamProtocol  string `json:"upstream_protocol,omitempty"`
+	UpstreamServer    string `json:"upstream_server,omitempty"`
+	UpstreamPort      int    `json:"upstream_port,omitempty"`
 }
 
 // Status represents the proxy status
@@ -83,22 +89,27 @@ type LogEntry struct {
 
 // Controller controls the mihomo process
 type Controller struct {
-	cmd        *exec.Cmd
-	status     Status
-	mu         sync.RWMutex
-	logCh      chan LogEntry
-	apiClient  *http.Client
-	cfg        *config.Config
-	configPath string
-	pid        int
-	port       int
-	apiPort    int
-	redirPort  int
-	apiHost    string
-	proxyHost  string
-	secret     string
-	logPath    string
-	attached   bool // true if restored from lockfile (not started by this process)
+	cmd              *exec.Cmd
+	status           Status
+	mu               sync.RWMutex
+	logCh            chan LogEntry
+	apiClient        *http.Client
+	cfg              *config.Config
+	configPath       string
+	pid              int
+	port             int
+	apiPort          int
+	redirPort        int
+	apiHost          string
+	proxyHost        string
+	secret           string
+	logPath          string
+	attached         bool // true if restored from lockfile (not started by this process)
+	effectiveProxy   string
+	upstreamEnabled  bool
+	upstreamProtocol string
+	upstreamServer   string
+	upstreamPort     int
 }
 
 // NewController creates a new proxy controller
@@ -206,9 +217,10 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	c.redirPort = redirPort
 	c.proxyHost = proxyDialHost
 	c.secret = secret
+	c.setChainRuntimeLocked(0, selectedNode)
 
 	// Generate mihomo config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, apiHost, c.redirPort)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, 0, c.port, c.apiPort, apiHost, c.redirPort)
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to generate config: %v", err)
@@ -333,6 +345,11 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 		Secret:            c.secret,
 		StartedAt:         time.Now().UTC().Format(time.RFC3339),
 		Detached:          true,
+		EffectiveProxy:    c.effectiveProxy,
+		UpstreamEnabled:   c.upstreamEnabled,
+		UpstreamProtocol:  c.upstreamProtocol,
+		UpstreamServer:    c.upstreamServer,
+		UpstreamPort:      c.upstreamPort,
 	}
 	// Write lock file in v2 (MultiLockFile) format so it won't be misinterpreted
 	// on TUI restart. Slot 0 is used as the default for the legacy Start() path.
@@ -344,10 +361,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 
 	startedPID := c.pid
 	startedCmd := c.cmd
-	selectedName := ""
-	if selectedNode != nil {
-		selectedName = selectedNode.Name
-	}
+	selectedName := c.effectiveProxy
 	apiSecret := c.secret
 
 	// Wait for mihomo API to be ready and switch to selected node (best-effort).
@@ -513,6 +527,21 @@ func (c *Controller) CurrentPort() int {
 	return 0
 }
 
+func (c *Controller) setChainRuntimeLocked(slotID int, selectedNode *subscription.Node) {
+	c.effectiveProxy = effectiveProxyName(slotID, selectedNode, c.cfg)
+	c.upstreamEnabled = false
+	c.upstreamProtocol = ""
+	c.upstreamServer = ""
+	c.upstreamPort = 0
+
+	if upstream, ok := c.cfg.EffectiveUpstreamForSlot(slotID); ok {
+		c.upstreamEnabled = true
+		c.upstreamProtocol = upstream.Protocol
+		c.upstreamServer = upstream.Server
+		c.upstreamPort = upstream.Port
+	}
+}
+
 // UpdateLockState best-effort updates the proxy.lock file with extra metadata for re-attach.
 // It does not start/stop the proxy core.
 func (c *Controller) UpdateLockState(subID string, node *subscription.Node) {
@@ -525,6 +554,9 @@ func (c *Controller) UpdateLockState(subID string, node *subscription.Node) {
 			l.NodeServer = node.Server
 			l.NodePort = node.Port
 			l.NodeType = node.Type
+			if !l.UpstreamEnabled {
+				l.EffectiveProxy = node.Name
+			}
 		}
 	})
 }
@@ -626,7 +658,8 @@ func (c *Controller) Reload(nodes []subscription.Node, selectedNode *subscriptio
 	defer c.mu.Unlock()
 
 	// Generate new config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, c.apiHost, c.redirPort)
+	c.setChainRuntimeLocked(0, selectedNode)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, 0, c.port, c.apiPort, c.apiHost, c.redirPort)
 	if err != nil {
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
@@ -783,6 +816,14 @@ type connectionsResponse struct {
 	UploadTotal   int64 `json:"uploadTotal"`
 }
 
+type versionResponse struct {
+	Version string `json:"version"`
+}
+
+type rulesResponse struct {
+	Rules []json.RawMessage `json:"rules"`
+}
+
 func (c *Controller) doAPI(req *http.Request) (*http.Response, error) {
 	client := c.apiClient
 	if client == nil {
@@ -841,6 +882,96 @@ func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64,
 	return out.UploadTotal, out.DownloadTotal, nil
 }
 
+// GetCoreVersion returns the mihomo core version string.
+func (c *Controller) GetCoreVersion() (string, error) {
+	c.mu.RLock()
+	if c.status != StatusRunning {
+		c.mu.RUnlock()
+		return "", fmt.Errorf("proxy is not running")
+	}
+
+	apiHost := c.apiHost
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	apiPort := c.apiPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	secret := c.secret
+	c.mu.RUnlock()
+
+	apiURL := fmt.Sprintf("http://%s:%d/version", apiHost, apiPort)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
+	resp, err := c.doAPI(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to call API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var out versionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	return out.Version, nil
+}
+
+// GetRulesCount returns the number of rules loaded in the core.
+func (c *Controller) GetRulesCount() (int, error) {
+	c.mu.RLock()
+	if c.status != StatusRunning {
+		c.mu.RUnlock()
+		return 0, fmt.Errorf("proxy is not running")
+	}
+
+	apiHost := c.apiHost
+	if apiHost == "" {
+		apiHost = "127.0.0.1"
+	}
+	apiPort := c.apiPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	secret := c.secret
+	c.mu.RUnlock()
+
+	apiURL := fmt.Sprintf("http://%s:%d/rules", apiHost, apiPort)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
+	resp, err := c.doAPI(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var out rulesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return len(out.Rules), nil
+}
+
 // removeLockFile removes the proxy.lock file
 func (c *Controller) removeLockFile() {
 	lockPath, err := config.GetLockFilePath()
@@ -852,22 +983,26 @@ func (c *Controller) removeLockFile() {
 
 // ReadLockFile reads the proxy.lock file (exported for c4cgo)
 func ReadLockFile() (*LockFile, error) {
-	lockPath, err := config.GetLockFilePath()
+	mlf, err := ReadMultiLockFile()
 	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		return nil, err
+	if mlf == nil || len(mlf.Instances) == 0 {
+		return nil, os.ErrNotExist
+	}
+	if lock, ok := mlf.Instances[0]; ok {
+		lockCopy := lock
+		return &lockCopy, nil
 	}
 
-	var lockFile LockFile
-	if err := json.Unmarshal(data, &lockFile); err != nil {
-		return nil, err
+	ids := make([]int, 0, len(mlf.Instances))
+	for id := range mlf.Instances {
+		ids = append(ids, id)
 	}
-
-	return &lockFile, nil
+	sort.Ints(ids)
+	lock := mlf.Instances[ids[0]]
+	lockCopy := lock
+	return &lockCopy, nil
 }
 
 func writeLockFile(lockFile LockFile) error {
@@ -944,6 +1079,14 @@ func (c *Controller) applyLockFileLocked(lock *LockFile) {
 	c.configPath = lock.ConfigPath
 	c.logPath = lock.LogPath
 	c.secret = lock.Secret
+	c.effectiveProxy = lock.EffectiveProxy
+	c.upstreamEnabled = lock.UpstreamEnabled
+	c.upstreamProtocol = lock.UpstreamProtocol
+	c.upstreamServer = lock.UpstreamServer
+	c.upstreamPort = lock.UpstreamPort
+	if c.effectiveProxy == "" {
+		c.effectiveProxy = lock.Node
+	}
 }
 
 func (c *Controller) syncFromLockFile() {

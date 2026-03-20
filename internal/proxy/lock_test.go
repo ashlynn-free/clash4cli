@@ -91,3 +91,26 @@ func TestLockFile_Update(t *testing.T) {
 		t.Fatalf("unexpected updated lock: %#v", got)
 	}
 }
+
+func TestReadLockFile_ReadsSlot0FromMultiLock(t *testing.T) {
+	setupTestHome(t)
+
+	mlf := &MultiLockFile{
+		Version: 2,
+		Instances: map[int]LockFile{
+			0: {Port: 17890, APIPort: 19090, PID: 11, Node: "slot0"},
+			2: {Port: 17892, APIPort: 19092, PID: 22, Node: "slot2"},
+		},
+	}
+	if err := writeMultiLockFile(mlf); err != nil {
+		t.Fatalf("writeMultiLockFile: %v", err)
+	}
+
+	got, err := ReadLockFile()
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if got.Node != "slot0" || got.Port != 17890 {
+		t.Fatalf("expected slot0 lock, got %#v", got)
+	}
+}

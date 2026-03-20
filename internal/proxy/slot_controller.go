@@ -72,6 +72,16 @@ func (sc *SlotController) GetTrafficTotals() (int64, int64, error) {
 	return sc.ctrl.GetTrafficTotals()
 }
 
+// GetCoreVersion returns the mihomo core version string.
+func (sc *SlotController) GetCoreVersion() (string, error) {
+	return sc.ctrl.GetCoreVersion()
+}
+
+// GetRulesCount returns the number of rules loaded in the core.
+func (sc *SlotController) GetRulesCount() (int, error) {
+	return sc.ctrl.GetRulesCount()
+}
+
 // GetStatus returns the current proxy status.
 func (sc *SlotController) GetStatus() Status {
 	return sc.ctrl.GetStatus()
@@ -238,9 +248,10 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 	c.apiPort = apiPort
 	c.proxyHost = proxyDialHost
 	c.secret = secret
+	c.setChainRuntimeLocked(slotID, selectedNode)
 
 	// Generate mihomo config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, c.port, c.apiPort, apiHost, 0)
+	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, slotID, c.port, c.apiPort, apiHost, 0)
 	if err != nil {
 		c.status = StatusError
 		return fmt.Errorf("failed to generate config: %w", err)
@@ -316,10 +327,7 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 
 	startedPID := c.pid
 	startedCmd := c.cmd
-	selectedName := ""
-	if selectedNode != nil {
-		selectedName = selectedNode.Name
-	}
+	selectedName := c.effectiveProxy
 	apiSecret := c.secret
 
 	// Wait for API and switch node (best-effort)

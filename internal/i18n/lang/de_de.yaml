@@ -24,6 +24,15 @@ nodes:
   timeout: "Zeitüberschreitung"
   unknown: "Unbekannt"
 
+node_detail:
+  title: "Knotendetails"
+  server: "Server"
+  settings: "Einstellungen"
+  website_tests: "Website-Tests"
+  testing: "Teste..."
+  not_tested: "Nicht getestet"
+  no_proxy: "Kein aktiver Proxy-Slot"
+
 subscription:
   name: "Name"
   url: "URL"

@@ -39,11 +39,16 @@ type NodesTab struct {
 	// Multi-slot indicators: node name → indicator
 	slotIndicators map[string]SlotIndicator
 	// Per-node traffic info for active slots: node name → formatted string
-	slotTraffic    map[string]string
-	serverDisplay  string // show|blur|off
-	preselectName  string
+	slotTraffic     map[string]string
+	serverDisplay   string // show|blur|off
+	preselectName   string
 	preselectServer string
-	preselectPort  int
+	preselectPort   int
+	// Detail view
+	showDetail bool
+	detailView *NodeDetailView
+	// firstLoad triggers an automatic latency test on the first node refresh.
+	firstLoad bool
 }
 
 // NewNodesTab creates a new nodes tab
@@ -54,6 +59,7 @@ func NewNodesTab(nodeMgr *node.Manager) *NodesTab {
 		serverDisplay:  "show",
 		slotIndicators: make(map[string]SlotIndicator),
 		slotTraffic:    make(map[string]string),
+		firstLoad:      true,
 	}
 }
 
@@ -64,6 +70,19 @@ func (t *NodesTab) Init() tea.Cmd {
 
 // Update handles messages
 func (t *NodesTab) Update(msg tea.Msg) (*NodesTab, tea.Cmd) {
+	// Forward messages to detail view when active
+	if t.showDetail && t.detailView != nil {
+		switch msg.(type) {
+		case NodeDetailCloseMsg:
+			t.showDetail = false
+			t.detailView = nil
+			return t, nil
+		}
+		var cmd tea.Cmd
+		t.detailView, cmd = t.detailView.Update(msg)
+		return t, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -77,6 +96,8 @@ func (t *NodesTab) Update(msg tea.Msg) (*NodesTab, tea.Cmd) {
 			return t, t.testAllNodes()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
 			return t, t.refreshNodes()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("i"))):
+			return t, t.openDetailView()
 		}
 
 	case NodeTestResultMsg:
@@ -92,13 +113,36 @@ func (t *NodesTab) Update(msg tea.Msg) (*NodesTab, tea.Cmd) {
 		t.nodes = msg.Nodes
 		t.updateTableRows()
 		t.applyPreselect()
+		if t.firstLoad && len(msg.Nodes) > 0 {
+			t.firstLoad = false
+			return t, t.testAllNodes()
+		}
 	}
 
 	return t, nil
 }
 
+// InDetailView returns true when the detail sub-view is open.
+func (t *NodesTab) InDetailView() bool {
+	return t.showDetail
+}
+
+func (t *NodesTab) openDetailView() tea.Cmd {
+	idx := t.table.Selected()
+	if idx < 0 || idx >= len(t.nodes) {
+		return nil
+	}
+	t.detailView = NewNodeDetailView(t.nodes[idx], t.width, t.height, t.nodeManager.GetProbeLock(&t.nodes[idx]))
+	t.showDetail = true
+	return nil
+}
+
 // View renders the tab
 func (t *NodesTab) View() string {
+	if t.showDetail && t.detailView != nil {
+		return t.detailView.View()
+	}
+
 	m := i18n.M()
 
 	if len(t.nodes) == 0 {
@@ -114,7 +158,8 @@ func (t *NodesTab) View() string {
 		styles.HelpKey.Render("0-9") + styles.HelpText.Render(" slots  ") +
 		styles.HelpKey.Render("D") + styles.HelpText.Render(" disconnect all  ") +
 		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
-		styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh")
+		styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh  ") +
+		styles.HelpKey.Render("i") + styles.HelpText.Render(" detail")
 
 	if t.testing {
 		help += "  " + styles.NodeTesting.Render(m.Nodes.Testing)
@@ -127,6 +172,9 @@ func (t *NodesTab) View() string {
 func (t *NodesTab) SetSize(width, height int) {
 	t.width = width
 	t.height = height
+	if t.detailView != nil {
+		t.detailView.SetSize(width, height)
+	}
 	// Reserve space for fixed elements that are always displayed:
 	// - subTabs line + BorderBottom: 2 lines
 	// - table header: 1 line

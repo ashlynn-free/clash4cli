@@ -1,0 +1,13 @@
+{
+  "name": "@clash4cli/linux-x64",
+  "version": "0.0.0",
+  "description": "clash4cli platform binaries for Linux x64",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "preferUnplugged": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashlynn-free/clash4cli"
+  }
+}

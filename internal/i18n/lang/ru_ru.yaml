@@ -24,6 +24,15 @@ nodes:
   timeout: "Тайм-аут"
   unknown: "Неизвестно"
 
+node_detail:
+  title: "Детали узла"
+  server: "Сервер"
+  settings: "Настройки"
+  website_tests: "Тесты сайтов"
+  testing: "Тестирование..."
+  not_tested: "Не протестировано"
+  no_proxy: "Нет активного прокси-слота"
+
 subscription:
   name: "Имя"
   url: "URL"

@@ -24,6 +24,15 @@ nodes:
   timeout: "タイムアウト"
   unknown: "不明"
 
+node_detail:
+  title: "ノード詳細"
+  server: "サーバー"
+  settings: "設定"
+  website_tests: "ウェブサイトテスト"
+  testing: "テスト中..."
+  not_tested: "未テスト"
+  no_proxy: "アクティブなプロキシスロットがありません"
+
 subscription:
   name: "名前"
   url: "URL"

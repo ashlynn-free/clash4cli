@@ -1,0 +1,2461 @@
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta name="referrer" content="unsafe-url">
+    <script src="https://cdn.ping0.cc/js/vue.min.js"></script>
+    <script src="https://cdn.ping0.cc/js/axios.min.js"></script>
+    <script src="https://cdn.ping0.cc/js/head.js"></script>
+    <link rel="icon" href="/favico.ico?v=2472765412" type="image/x-icon" />
+    <title>1.65.250.176-高精度IP地址归属地查询-IP风控值查询-原生IP查询-IP类型查询-家庭宽带IP查询-全球小鸡监控平台</title>
+    <meta name="description" content="1.65.250.176-4760-PCCW IMS Limited-Hong Kong Telecommunications (HKT) Limited Mass Internet-pccw.com-pccw.com-hkt.com">
+    <style type="text/css">
+        html, body{
+            margin: 0;
+            padding: 0;
+            background: #ebebeb url('https://cdn.ping0.cc/images/light.png');
+            overflow: auto;
+        }
+        body{
+            position: relative;
+        }
+        #top{
+            background: #00050a;
+            color: #eee;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+        }
+        #top>.container{
+            display: flex;
+            justify-content: center;
+            background: #00050a;
+            padding:20px 0;
+            width: 1150px;
+        }
+
+        .container{
+            width: 100%;
+            margin: 0 auto;
+            min-width: 1200px;
+            position: relative;
+        }
+        #top .title{
+            display: flex;
+            align-items: center;
+            font-size: 28px;
+            margin-right: 40px;
+        }
+        #top .title>a{
+            color:#f3e998;
+            text-decoration: none;
+        }
+        #top .title>a>span{
+            margin-left: 2px;
+            color:#B28349;
+        }
+        #top>.container>.menu{
+            display: none;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        #top>.container>.menu>img{
+            width: 32px;
+        }
+        .tabs{
+            display: flex;
+            font-size: 14px;
+        }
+        .tabs>a,.tabs>div,#top .multimenu>.submenu>a{
+            padding: 10px;
+            margin-left: 30px;
+            display: block;
+            color:#f0f0f0;
+            text-decoration: none;
+        }
+        .tabs>a:hover,#top .multimenu>.submenu>a:hover{
+            color: #0096e6;
+            cursor: pointer;
+        }
+        .tabs>.active,#top .multimenu>.submenu>a.active{
+            color: #0096e6;
+        }
+        #top .multimenu{
+            position: relative;
+        }
+        #top .multimenu>.submenu{
+            position: absolute;
+            left: 0;
+            top: 40px;
+            width: max-content;
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            background: #00050a;
+            box-shadow: 0 0 2px #666;
+        }
+        #top .multimenu>.submenu>a{
+            margin-left: 0;
+            padding: 10px 30px;
+        }
+        #top>.container>.search{
+            margin-left: 50px;
+            display: flex;
+            align-items: center;
+        }
+
+        .lang-selector {
+            position: relative;
+            width: 100px;
+            font-size: 12px;
+            color: #f8f8f8;
+        }
+
+        .lang-current {
+            padding: 3px 2px;
+            background: transparent;
+            border-radius: 3px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .lang-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            background: transparent;
+            z-index: 10;
+            display: none;
+            margin-top: 4px;
+        }
+
+        .lang-dropdown.show {
+            display: block;
+        }
+
+        .lang-option {
+            padding: 3px 2px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .lang-option:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .flag-img {
+            width: 18px;
+            height: 16px;
+            object-fit: contain;
+            display: inline-block;
+        }
+
+        .flag-placeholder {
+            width: 24px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f1f5f9;
+            color: #64748b;
+            font-size: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 2px;
+        }
+        @media screen and (min-width: 1100px) {
+            .container{
+                width: 1080px;
+            }
+        }
+        @media screen and (min-width: 1400px) {
+            .container{
+                width: 1200px;
+            }
+        }
+        @media screen and (max-width: 1200px) {
+            #top>.container{
+                justify-content: center;
+                min-width: 0;
+            }
+            #top>.container>.menu{
+                display: block;
+            }
+            .lang-selector {
+                display: none;
+            }
+            #top>.container>.search,#top>.container>.tabs{
+                display: none;
+                flex-direction: column;
+                position: absolute;
+                background: #333;
+                top: 50px;
+                right: 10px;
+                z-index: 999;
+            }
+            #top>.container>.tabs>a{
+                margin-left: 0;
+                padding-left: 30px;
+            }
+        }
+    </style>
+    <!-- ========== 圣诞节效果开始 - 可在圣诞节后删除此部分 ========== -->
+    <style type="text/css">
+        /* 圣诞节雪花效果 - 仅在PC端显示 */
+        @media screen and (min-width: 768px) {
+        .christmas-snowflake {
+            position: fixed;
+            color: #ffffff;
+            font-size: 1.5em;
+            font-family: Arial, sans-serif;
+            z-index: 9998;
+            pointer-events: auto;
+            user-select: none;
+            animation: snowfall linear infinite;
+            filter: drop-shadow(0 0 5px rgba(255,255,255,1)) drop-shadow(0 0 10px rgba(200,220,255,0.8));
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s;
+            padding: 20px;
+            margin: -20px;
+        }
+        .christmas-snowflake:hover {
+            transform: scale(1.2);
+        }
+        .snowflake-particle {
+            position: fixed;
+            color: #ffffff;
+            font-size: 0.8em;
+            font-family: Arial, sans-serif;
+            z-index: 9999;
+            pointer-events: none;
+            user-select: none;
+            filter: drop-shadow(0 0 3px rgba(255,255,255,0.8));
+            font-weight: bold;
+        }
+        .snowflake-count {
+            position: fixed;
+            color: #FFD700;
+            font-size: 2em;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            z-index: 10000;
+            pointer-events: none;
+            user-select: none;
+            text-shadow: 0 0 10px rgba(255,215,0,1), 0 0 20px rgba(255,215,0,0.8), 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        @keyframes explode {
+            0% {
+                opacity: 1;
+                transform: translate(0, 0) scale(1) rotate(0deg);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(var(--tx), var(--ty)) scale(0.3) rotate(var(--rotate));
+            }
+        }
+        @keyframes countFade {
+            0% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            50% {
+                opacity: 1;
+                transform: translate(-50%, -70%) scale(1.3);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -90%) scale(0.8);
+            }
+        }
+        @keyframes snowfall {
+            0% {
+                transform: translateY(0) rotate(0deg);
+                opacity: 0;
+            }
+            3% {
+                opacity: 1;
+            }
+            97% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(calc(100vh + 50px)) rotate(360deg);
+                opacity: 0;
+            }
+        }
+        /* 圣诞节装饰元素 */
+        .christmas-decoration {
+            position: absolute;
+            z-index: 9997;
+            pointer-events: none;
+            user-select: none;
+        }
+        .christmas-star {
+            color: #FFD700;
+            font-size: 20px;
+            animation: twinkle 2s ease-in-out infinite;
+        }
+        @keyframes twinkle {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+        .christmas-hat {
+            font-size: 30px;
+            animation: float 3s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        /* 导航栏圣诞节装饰 */
+        #top.christmas-mode {
+            background: linear-gradient(135deg, #00050a 0%, #1a0a1a 50%, #00050a 100%);
+            position: relative;
+        }
+        #top.christmas-mode::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(255,0,0,0.3) 10%,
+                #ff0000 20%,
+                #ff6600 30%,
+                #00ff00 40%,
+                #ffff00 50%,
+                #00ff00 60%,
+                #ff6600 70%,
+                #ff0000 80%,
+                rgba(255,0,0,0.3) 90%,
+                transparent 100%);
+            background-size: 200% 100%;
+            animation: shimmer 20s linear infinite;
+            box-shadow: 0 0 10px rgba(255,0,0,0.6), 0 0 20px rgba(0,255,0,0.4), 0 2px 8px rgba(255,255,0,0.3);
+            filter: blur(0.5px);
+        }
+        @keyframes shimmer {
+            0% { 
+                background-position: -200% 0;
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.9;
+            }
+            100% { 
+                background-position: 200% 0;
+                opacity: 1;
+            }
+        }
+        /* 圣诞节艺术字体 - PING0 LOGO */
+        #top.christmas-mode .title>a {
+            background: linear-gradient(45deg, #ff0000, #00ff00, #ff0000, #ffff00, #ff0000);
+            background-size: 300% 300%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+            font-weight: bold;
+            font-size: 32px;
+            text-decoration: none;
+            letter-spacing: 2px;
+            position: relative;
+        }
+        #top.christmas-mode .title>a::before {
+            content: '';
+            position: absolute;
+            left: -45px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 40px;
+            height: 40px;
+            background-image: url('/static/images/denglong.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            animation: christmasTreeMove 3s ease-in-out infinite;
+            filter: drop-shadow(0 0 8px rgba(0, 255, 0, 0.8));
+            z-index: 1;
+        }
+        #top.christmas-mode .title>a::after {
+            content: '';
+            position: absolute;
+            right: -42px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 28px;
+            height: 28px;
+            background-image: url('https://cdn.ping0.cc/images/yanhua.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            animation: christmasSantaMove 3s ease-in-out infinite 0.5s;
+            filter: drop-shadow(0 0 8px rgba(255, 200, 0, 0.8));
+            z-index: 1;
+        }
+        /* 圣诞树动画 - 摇摆+闪烁+弹跳 */
+        @keyframes christmasTreeMove {
+            0%, 100% { 
+                transform: translateY(-50%) rotate(-5deg) scale(1);
+                opacity: 1;
+            }
+            25% { 
+                transform: translateY(-55%) rotate(5deg) scale(1.1);
+                opacity: 0.9;
+            }
+            50% { 
+                transform: translateY(-50%) rotate(-3deg) scale(1.15);
+                opacity: 1;
+            }
+            75% { 
+                transform: translateY(-45%) rotate(3deg) scale(1.05);
+                opacity: 0.95;
+            }
+        }
+        /* 圣诞老人动画 - 挥手+弹跳+闪烁 */
+        @keyframes christmasSantaMove {
+            0%, 100% { 
+                transform: translateY(-50%) rotate(0deg) scale(1);
+                opacity: 1;
+            }
+            20% { 
+                transform: translateY(-55%) rotate(-8deg) scale(1.1);
+                opacity: 0.9;
+            }
+            40% { 
+                transform: translateY(-50%) rotate(8deg) scale(1.15);
+                opacity: 1;
+            }
+            60% { 
+                transform: translateY(-45%) rotate(-5deg) scale(1.05);
+                opacity: 0.95;
+            }
+            80% { 
+                transform: translateY(-52%) rotate(5deg) scale(1.08);
+                opacity: 0.9;
+            }
+        }
+        #top.christmas-mode .title>a>span {
+            background: linear-gradient(45deg, #ffff00, #ff0000, #ffff00, #00ff00, #ffff00);
+            background-size: 300% 300%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+            font-weight: bold;
+            font-size: 36px;
+            text-shadow: 0 0 25px rgba(255,255,0,0.9), 0 0 50px rgba(255,0,0,0.7);
+            filter: drop-shadow(0 0 15px rgba(255,255,0,1)) drop-shadow(0 0 25px rgba(255,0,0,0.8));
+            animation: christmasTextGlow 2.5s ease-in-out infinite 0.5s;
+            margin-left: 4px;
+        }
+        @keyframes christmasTextGlow {
+            0%, 100% {
+                background-position: 0% 50%;
+                filter: drop-shadow(0 0 10px rgba(255,200,0,0.8)) drop-shadow(0 0 20px rgba(255,0,0,0.6));
+            }
+            25% {
+                background-position: 100% 50%;
+                filter: drop-shadow(0 0 15px rgba(0,255,0,0.9)) drop-shadow(0 0 25px rgba(255,255,0,0.7));
+            }
+            50% {
+                background-position: 200% 50%;
+                filter: drop-shadow(0 0 12px rgba(255,0,0,0.9)) drop-shadow(0 0 22px rgba(255,200,0,0.7));
+            }
+            75% {
+                background-position: 100% 50%;
+                filter: drop-shadow(0 0 15px rgba(255,255,0,0.9)) drop-shadow(0 0 25px rgba(0,255,0,0.7));
+            }
+        }
+        } /* 结束媒体查询 - 仅在PC端显示 */
+    </style>
+    <!-- ========== 圣诞节效果结束 ========== -->
+</head>
+<body>
+<div class="top" id="top">
+    <div class="container">
+        <div class="title"><a href="/">PING<span>0</span></a></div>
+        <div class="menu" @click="showmenu">
+            <img src="/static/images/menu.png" alt="">
+        </div>
+        <div class="tabs">
+            <a :class="{'active': activeItem == 'ipcheck'}" href="https://ping0.cc">
+                IP 查询                <sup style="color:red;margin-left: 2px;"></sup>
+            </a>
+            <a :class="{'active': activeItem == 'reverse'}" href="https://ping0.cc/reverse">
+                IP 反查域名                <sup style="color:red;margin-left: 2px;">New</sup>
+            </a>
+            <a :class="{'active': activeItem == 'latency'}" href="http://ip.ping0.cc/latency">
+                Latency
+            </a>
+            <a :class="{'active': activeItem == 'ping'}" href="http://ip.ping0.cc/ping">
+                Ping
+            </a>
+
+            <a :class="{'active': activeItem == 'trace'}" href="https://ping0.cc/trace">
+                Trace
+
+            </a>
+
+            <div :class="{'active': activeItem == '24hour' || activeItem == '5day' || activeItem == '30day'
+            || activeItem == '300day'}" class="multimenu" @mouseenter="showmenuvps=true" @mouseleave="showmenuvps=false">
+            小鸡监控 <span style="transform: scale(1.2, 0.5);display: inline-block;margin-left: 4px;">V</span>
+                <div class="submenu" v-show="showmenuvps">
+                    <a :class="{'active': activeItem == '24hour'}" href="https://ping0.cc/vpsmon/24hour">
+                        近24小时                    </a>
+                    <a :class="{'active': activeItem == '5day'}" href="https://ping0.cc/vpsmon/5day">
+                        近5天                    </a>
+                    <a :class="{'active': activeItem == '30day'}" href="https://ping0.cc/vpsmon/30day">
+                        近一个月                    </a>
+                    <a :class="{'active': activeItem == '300day'}" href="https://ping0.cc/vpsmon/300day">
+                        近一年                    </a>
+
+                </div>
+            </div>
+
+            <a :class="{'active': activeItem == 'asnmon'}" href="https://ping0.cc/Ip/asnmon">
+                ASN 变化监控            </a>
+            <a :class="{'active': activeItem == 'ipleak'}" href="http://ipv4.ping0.cc/ipleak">
+                IP Leak 检测            </a>
+            <!--
+            <a :class="{'active': activeItem == 'port'}" href="https://ping0.cc/port">
+                端口检测
+            </a>
+            -->
+        </div>
+        <div class="search" style="display: none;">
+            <input type="text" placeholder="输入IP" v-model="ip" @keyup.enter="oncheckip" style="padding: 5px 10px;outline: none;"/>
+            <button style="font-size: 12px;padding: 5px 10px;" @click="oncheckip">查询</button>
+        </div>
+    </div>
+    <div class="lang-selector">
+        <div class="lang-current" id="current">
+          <span class="flag-img" style="background:url('/static/images/flags/us.png') no-repeat center; background-size: contain;"></span>
+          <span>English</span>
+        </div>
+        <div class="lang-dropdown" id="dropdown">
+        </div>
+      </div>
+</div>
+<script type="text/javascript">
+    function checkip(ip){
+        ip = ip.trim()
+        if ((ip.substr(0, 2).toUpperCase() === 'AS' && ip.substr(2).match(/^\d+$/)) || (ip.match(/^\d+$/) && ip < 2147483647)) {
+            var newPath = '//as/'+ip;
+            newPath = newPath.replace(/\/{2,}/g, '/') || '/';
+            window.location.href = newPath
+        }
+        else {
+            if (ip.substr(-1) == '.')
+                ip = ip.substr(0, ip.length - 1)
+            var exp=/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/;
+            var reg = ip.match(exp);
+            if(reg == null && ip.length != 0){
+                if (ip.substr(0, 4) == 'http'){
+                    ip = ip.substr(ip.indexOf('//') + 2);
+                    if (ip.indexOf('/') != -1){
+                        ip = ip.substr(0, ip.indexOf('/'));
+                    }
+                }
+            }
+
+            var newPath = '//ip/'+ip;
+            newPath = newPath.replace(/\/{2,}/g, '/') || '/';
+            window.location.href = newPath
+        }
+    }
+    var apptop = new Vue({
+        el: '#top',
+        data: {
+            ip: '',
+            activeItem: 'ipcheck',
+            showmenuvps: false,
+            topmenu: false,
+        },
+        methods:{
+            oncheckip: function(){
+                checkip(this.ip)
+            },
+            showmenu: function(){
+                const tabs = document.querySelector("#top>.container>.tabs").style
+                if (tabs.display === 'block')
+                    tabs.display = 'none'
+                else
+                    tabs.display = 'block'
+            }
+        }
+    })
+
+    function ipv4cb(ip, location, asn, org)
+    {
+        axios({
+            method:'get',
+            url:'/logv6/'+window.ipv6 + '/' + ip
+        }).then((res)=> {
+
+        })
+    }
+
+    function ipv6cb(ip, location, asn, org)
+    {
+        window.ipv6 = ip
+        var oHead = document.getElementsByTagName("HEAD").item(0);
+        var oScript= document.createElement("script");
+        oScript.type = "text/javascript";
+        oScript.src="https://ipv4.ping0.cc/geo/jsonp/ipv4cb";
+        oHead.appendChild( oScript);
+    }
+    function trackad(id) {
+        axios({
+            method:'get',
+            url:'/trackad/'+id
+        }).then((res)=> {
+
+        })
+    }
+
+    const languages = {
+        en: { name: 'English' },
+        zh: { name: '中文' },
+    };
+
+    const flags = {
+        en: 'us',
+        zh: 'cn'
+    }
+
+    const current = document.getElementById('current');
+    const dropdown = document.getElementById('dropdown');
+
+    function createFlag(langCode) {
+        const flagContainer = document.createElement('span');
+        flagContainer.className = 'flag-img';
+
+        const flag = flags[langCode];
+
+        const img = new Image();
+        img.src = `/static/images/flags/${flag}.png`;
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'contain';
+
+        flagContainer.appendChild(img);
+        return flagContainer;
+    }
+
+    function renderLangSelector() {
+        dropdown.innerHTML = '';
+        for (const code in languages) {
+            const lang = languages[code];
+            const option = document.createElement('div');
+            option.className = 'lang-option';
+            option.dataset.lang = code;
+            
+            const flag = createFlag(code);
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = lang.name;
+            
+            option.appendChild(flag);
+            option.appendChild(nameSpan);
+            
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                updateCurrent(code);
+                dropdown.classList.remove('show');
+
+                const pathname = window.location.pathname;
+                const search = window.location.search;
+                const hash = window.location.hash;
+
+                let suffix = pathname;
+                for (const lang of Object.keys(languages)) {
+                    if (pathname === '/' + lang || pathname.startsWith('/' + lang + '/')) {
+                        suffix = pathname.slice(('/' + lang).length) || '/';
+                        break;
+                    }
+                }
+
+                let newPath;
+                if (code === 'zh') {
+                    newPath = suffix === '/' ? '/' : suffix;
+                } else {
+                    newPath = suffix === '/' ? '/' + code : '/' + code + suffix;
+                }
+
+                window.location.href = newPath + search + hash;
+            });
+            
+            dropdown.appendChild(option);
+        }
+    }
+
+    function updateCurrent(langCode) {
+        if (!langCode) {
+            langCode = 'zh'
+        }
+        const lang = languages[langCode];
+        if (!lang) return;
+
+        current.innerHTML = '';
+        const flag = createFlag(langCode);
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = lang.name;
+
+        current.appendChild(flag);
+        current.appendChild(nameSpan);
+    }
+
+    renderLangSelector();
+
+    current.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('show');
+    });
+
+    document.addEventListener('click', () => {
+        dropdown.classList.remove('show');
+    });
+
+    updateCurrent('');
+</script>
+
+<script src="/static/js/dom-to-image.min.js"></script>
+<script src="/static/js/FileSaver.min.js"></script>
+<link rel="stylesheet" href="https://cdn.ping0.cc/css/check.css">
+<!--
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4408350776179053"
+     crossorigin="anonymous"></script>
+-->
+<style type="text/css">
+    .bgphistory>.latest{
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .bgphistory>.latest>img,.bgphistory>.history>img{
+        max-height: 200px;
+        cursor: zoom-in;
+        transition: max-height 0.3s ease;
+        height: auto;
+        width: auto;
+        max-width: 100%;
+    }
+    .bgphistory>.latest>img.zoomed,.bgphistory>.history>img.zoomed{
+        max-height: 5000px;
+        cursor: zoom-out;
+    }
+    .bgphistory>.history>img{
+        max-height: 30px;
+        border: 1px solid #888;
+        margin-right: 10px;
+        border-radius: 5px;
+    }
+    /* ========== 圣诞节效果开始 - 可在圣诞节后删除此部分 ========== */
+    /* 仅在PC端显示 - 屏幕宽度 >= 768px */
+    @media screen and (min-width: 768px) {
+    .christmas-home-decoration {
+        position: absolute;
+        z-index: 9996;
+        pointer-events: none;
+        user-select: none;
+        font-size: 40px;
+    }
+    .christmas-tree {
+        animation: sway 4s ease-in-out infinite;
+        transform-origin: top center;
+    }
+    @keyframes sway {
+        0%, 100% { transform: rotate(-2deg); }
+        50% { transform: rotate(2deg); }
+    }
+    .christmas-gift {
+        animation: bounce 2s ease-in-out infinite;
+    }
+    @keyframes bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+    }
+    #check .search {
+        position: relative;
+    }
+    .christmas-search-tree {
+        position: absolute;
+        width: 40px;               /* 控制图片大小 */
+        height: 40px;              /* 与 width 保持比例 */
+        background-image: url('https://cdn.ping0.cc/images/yanhua.png');
+        background-size: contain;
+        background-repeat: no-repeat;
+        background-position: center;
+        animation: twinkle 2s ease-in-out infinite;
+        z-index: 10;
+        pointer-events: none;
+        user-select: none;
+        filter: drop-shadow(0 0 8px rgba(255, 200, 0, 0.9));
+    }
+    .christmas-search-tree.left {
+        left: 5%;
+        top: 20px;
+    }
+    .christmas-search-tree.right {
+        right: 5%;
+        top: 20px;
+        animation: twinkle 2s ease-in-out infinite 1s;
+    }
+    @keyframes twinkle {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.7; transform: scale(1.1); }
+    }
+
+    /* 输入框圣诞节风格 */
+    #check .search .input {
+        position: relative;
+        display: inline-block;
+        position: relative;
+        padding: 3px;
+        background: linear-gradient(45deg, #c41e3a, #165b33, #c41e3a, #165b33);
+        background-size: 300% 300%;
+        border-radius: 15px;
+        animation: gradientShift 3s ease infinite;
+        margin-top: 20px;
+    }
+
+    #check>.search .input>input{
+        margin-top: 0px;
+    }
+
+    @keyframes gradientShift {
+            0%, 100% {
+                background-position: 0% 50%;
+            }
+            50% {
+                background-position: 100% 50%;
+            }
+        }
+
+    #check .search .input::before {
+        content: '';
+        position: absolute;
+        top: -4px;
+        left: -4px;
+        right: -4px;
+        bottom: -4px;
+        background: linear-gradient(45deg, #c41e3a, #165b33, #c41e3a, #165b33);
+        background-size: 300% 300%;
+        border-radius: 15px;
+        animation: christmasGradientShift 3s ease infinite;
+        z-index: -1;
+    }
+
+    @keyframes christmasGradientShift {
+        0%, 100% {
+            background-position: 0% 50%;
+        }
+        50% {
+            background-position: 100% 50%;
+        }
+    }
+
+    #check>.container{
+        margin-top: -220px;
+        z-index: 99;
+    }
+    #check .search .input input {
+        border: none !important;
+        background: #01050a !important;
+        border-radius: 10px !important;
+        transition: all 0.3s ease !important;
+        position: relative;
+        z-index: 1;
+    }
+
+    #check .search .input input:focus {
+        background: #01050a !important;
+    }
+
+    /* 圣诞彩灯 */
+    .christmas-lights {
+        position: absolute;
+        top: -15px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        justify-content: space-around;
+        z-index: 10;
+        width: 200px;
+        pointer-events: none;
+    }
+
+    .christmas-light {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        animation: christmasBlink 1.5s infinite;
+    }
+
+    .christmas-light:nth-child(1) { background: #ff0000; animation-delay: 0s; }
+    .christmas-light:nth-child(2) { background: #00ff00; animation-delay: 0.3s; }
+    .christmas-light:nth-child(3) { background: #ffff00; animation-delay: 0.6s; }
+    .christmas-light:nth-child(4) { background: #0000ff; animation-delay: 0.9s; }
+    .christmas-light:nth-child(5) { background: #ff00ff; animation-delay: 1.2s; }
+
+    @keyframes christmasBlink {
+        0%, 100% {
+            opacity: 1;
+            box-shadow: 0 0 10px currentColor;
+        }
+        50% {
+            opacity: 0.3;
+        }
+    }
+
+    /* 圣诞装饰图标 */
+    .christmas-santa {
+        position: absolute;
+        top: -30px;
+        right: 10%;
+        font-size: 30px;
+        animation: christmasSwing 2s ease-in-out infinite;
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    @keyframes christmasSwing {
+        0%, 100% {
+            transform: rotate(-5deg);
+        }
+        50% {
+            transform: rotate(5deg);
+        }
+    }
+
+    .christmas-gift {
+        position: absolute;
+        bottom: -10px;
+        left: 10%;
+        font-size: 25px;
+        animation: christmasGiftBounce 2s ease-in-out infinite;
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    @keyframes christmasGiftBounce {
+        0%, 100% {
+            transform: translateY(0);
+        }
+        50% {
+            transform: translateY(-10px);
+        }
+    }
+
+    }
+    /* ========== 圣诞节效果结束 ========== */
+</style>
+
+<div id="check">
+    <div class="search" id="search">
+        <div class="container" style="text-align: center;padding-top: 80px;z-index:9;">
+            <div class="location" style="display: flex; justify-content: center; align-items: center;">
+                <img src="/static/images/location.png" alt="" height="60" style="height: 28px;width: 22px;" />
+                <span style="color: #ddd;font-size: 18px;margin-left: 15px;">IP、域名、ASN</span>
+            </div>
+            <div class="input">
+                <input type="text" placeholder="输入IP / 域名 / ASN" v-model="ip" @keyup.enter="oncheckip">
+            </div>
+            <div class="op">
+                <button @click="oncheckip">🔍️ 查询</button>
+        </div>
+
+        </div>
+    </div>
+    <div class="container">
+        <div class="xxeles toprow">
+                        <a rel="noopener nofollow" href="https://www.onesproxy.com/?user_source=1&invite_code=HLY74977" target="_blank" style="display:block;position: relative;" @click="trackad(3)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/8c0e97165f9193cadf2d90966867b770.gif" width="100%" style="max-height: 70px;">
+            </a>
+                        <a rel="noopener nofollow" href="https://proxy-seller.com/zh/?partner=062O6O1HLPL6LE" target="_blank" style="display:block;position: relative;" @click="trackad(12)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/738bbfd726bf8fc641150cba61544596.gif" width="100%" style="max-height: 70px;">
+            </a>
+                        <a rel="noopener nofollow" href="https://proxy-cheap.com/?utm_source=ping0cc&utm_medium=banner&utm_campaign=display_ads" target="_blank" style="display:block;position: relative;" @click="trackad(13)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/d9de6192346895b1eab7d4dd2f99d394.gif" width="100%" style="max-height: 70px;">
+            </a>
+                    </div>
+        <div id="ad_left" style="position: absolute;display: none;flex-direction:column;height: 600px;width: 80px;left:0;margin-left: -90px;">
+            <div style="display: flex;flex:1;align-items: center;justify-content: center;">
+                80 x 300
+            </div>
+            <div style="display: flex;flex:1;align-items: center;justify-content: center;">
+                30 x 300
+            </div>
+        </div>
+        <div id="adxright">
+                        <a rel="noopener nofollow" href="https://tdkj88.com/?ping0" target="_blank" style="display:block;position: relative;" @click="trackad(3003)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/35ad5700eed35abded2b978df04b8740.gif">
+            </a>
+                                    <a rel="noopener nofollow" href="https://www.miyaip.com/?invitecode=ping0" target="_blank" style="display:block;position: relative;" @click="trackad(3001)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/80d111d182bb149d03e5a19f714fe1e2.gif">
+            </a>
+                                    <a rel="noopener nofollow" href="https://www.miluproxy.com/?code=299051" target="_blank" style="display:block;position: relative;" @click="trackad(3002)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/74cb6463c98da36dab55d7c995afcb1c.gif">
+            </a>
+                                    <a rel="noopener nofollow" href="https://margoproxy.cn/#/41QLNRUX" target="_blank" style="display:block;position: relative;" @click="trackad(3004)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/e96f6fe719f6b6bd1880387ff22ee276.gif">
+            </a>
+                                </div>
+        <div class="info asninfo">
+            <div class="title">
+                <div>
+                    <img src="/static/images/lead.png" alt="">查询结果                </div>
+                
+                <a style="float:right;color:white;cursor: pointer;text-decoration: none;border-bottom: 1px solid deepskyblue;color:#2e67fe;
+                border-radius: 5px;border:1px solid #2e67fe;padding: 2px 8px;display: flex;align-items: center;" @click="toimage">
+                    <img src="/static/images/jiandao.png" alt="" style="width: 10px;height: 10px;margin-right: 5px;">
+                    截图结果                </a>
+            </div>
+            <div class="content">
+                                <div class="line ip" style="margin:0 -1px 0 -1px;">
+                    <div class="name">
+                        IP 地址                    </div>
+                    <div class="content">
+                        <div class="ip" style="display: flex;justify-content: center;align-items: center;">
+                            <span style="margin-right: 5px;display: inline-block;">{{ showip ? ip : '************' }}</span>
+                            <img :src="showip ? '/static/images/show.png' : '/static/images/hide.png'" alt="" @click="showip=!showip">
+                        </div>
+                        
+                        <span v-if="rdns.length>0">({{rdns}})</span>
+
+                        <div class="op">
+                            <a target="_blank" href="http://ping0.cc/ping/1.65.250.176">ping</a>
+                            |
+                            <a target="_blank" href="https://ping0.cc/trace/1.65.250.176">trace</a>
+                        </div>
+
+                    </div>
+                </div>
+                <div class="line loc" style="margin:0 -1px 0 -1px;">
+                    <div class="name">
+                        IP 位置                    </div>
+                    <div class="content">
+                                                <img src="/static/images/flags/hk.png" alt="" />中国 香港 香港                                                <span class="report" @click="showErrorReport">错误提交</span>
+                    </div>
+                </div>
+                <div class="line asn">
+                    <div class="name">
+                        ASN                    </div>
+                    <div class="content">
+                                                <a href="https://ping0.cc/as/AS4760" target="_blank">AS4760</a>
+                                            </div>
+                </div>
+                                <div class="line asnname">
+                    <div class="name">
+                        ASN 所有者                    </div>
+                    <div class="content">
+                                                <span class="mini label orange" style="background:limegreen;" title="宽带运营商">ISP</span>
+                                                PCCW IMS Limited <span v-if="asndomain.length>0"> — <a :href='asndomain.substr(0,5) === "http:" ? asndomain : "http://"+asndomain' target="_blank">{{asndomain}}</a></span>
+                                            </div>
+                </div>
+                                <div class="line orgname">
+                    <div class="name">
+                        企业                    </div>
+                    <div class="content">
+                                                <span class="mini label orange" style="background:limegreen;" title="宽带运营商">ISP</span>
+                                                Hong Kong Telecommunications (HKT) Limited Mass Internet <span v-if="orgdomain.length>0"> — <a :href='orgdomain.substr(0,5) === "http:" ? orgdomain : "http://"+orgdomain' target="_blank">{{orgdomain}}</a></span>
+                                            </div>
+                </div>
+                <div class="line">
+                    <div class="name">
+                        经度                    </div>
+                    <div class="content">
+                        114.1747                    </div>
+                </div>
+                <div class="line">
+                    <div class="name">
+                        纬度                    </div>
+                    <div class="content">
+                        22.2783                    </div>
+                </div>
+                                <div class="line line-iptype">
+                    <div class="name">
+                        <span>IP 类型</span><a class="fielddesc" style="margin-left: 10px;font-size: 10px;color:deepskyblue;" 
+                        href="https://ping0.cc/ip/faq" target="_blank"
+                        title='"IDC机房IP" 特指机房专用的IP，除此外的IP均标记为 "家庭宽带IP"。
+关于识别是 IDC机房IP 还是 家庭宽带IP，可以根据上面的 ASN所有者 和 企业是否为ISP来简单的判断。
+这也是其它网站所使用的方法，然而这只能说明这个IP的拥有者是ISP，并不代表此IP实际使用在家庭宽带里。
+例如国内的IDC服务器IP，大部分都是归属于电信联通移动三大运营商，他们是ISP，但这些IP是用在IDC服务器里的，国外也同理。
+要更准确的标识一个IP实际使用在家庭宽带里还是IDC机房里，需要对每个IP段进行标识，这也是 Ping0 所使用的方法。
+Ping0 花费了大量的人力和时间对每一个IP段进行了标识，以准确的标识IP实际是用在家庭宽带里还是IDC机房里。
+所以有的 IP 在其它网站里显示为ISP，但是 Ping0 里会显示为 IDC ，因为 Ping0 的数据粒度更小，更精确。
+综上所述，其它网站只能标识IP的所有者是ISP还是IDC，而 Ping0 能准确识别IP的实际使用者是家庭还是IDC。
+'>(说明?)</a>
+                    </div>
+                    <div class="content">
+                                                <span class="label green">家庭宽带 IP</span>
+                        
+                        <a class="ispwhy" href="https://ping0.cc/ip/faq#ispwhy" target="_blank"
+                        style="color: #2e67fe;
+                        text-decoration: none;
+                        position: absolute;
+                        right: 20px;
+                        cursor: pointer;
+                        padding-bottom: 1px;
+                        border-bottom: 1px solid #2e67fe;transform: scale(0.9);">
+                            为什么双ISP还会显示"IDC机房IP"?                        </a>
+                    </div>
+                </div>
+                                <div class="line line-risk">
+                    <div class="name">
+                        <span>风控值                            <a class="fielddesc" style="margin-left: 10px;font-size: 10px;color:deepskyblue;"
+                            href="https://ping0.cc/ip/faq#iprisk" target="_blank"
+                            title="风控值代表IP的风险程度，值越大，风险越高, 50以内安全，70以上可直接拉黑。
+Ping0 通过大数据监测IP是否有扫描，爆破，爬虫，对外攻击，发送垃圾邮件，作为木马病毒的C&C服务等行为，以及危险行为的次数和频率来进行风控打分。
+请查看 CentOS 的 /var/log/secure 文件或者 Debian 的 journalctl -u ssh.service 的内容，这里都是一些尝试爆破你SSH密码的风险IP。">(说明?)</a>
+                        </span>
+                    </div>
+                    <div class="content">
+                        <div class="riskbar" style="display: flex;justify-content: center;align-items: center;">
+                                                        <div class="riskitem riskcurrent" style="background:green" title="0-15 极度纯净"><span class="value">4%</span><span class="lab"> 极度纯净</span></div>
+                                                        <div class="riskitem" style="background:limegreen" title="15-25 纯净"></div>
+                                                        <div class="riskitem" style="background:#b2dc5e" title="25-40 中性"></div>
+                                                        <div class="riskitem" style="background:#dddd00" title="40-50 轻微风险"></div>
+                                                        <div class="riskitem" style="background:#ffaa00" title="50-70 稍高风险"></div>
+                                                        <div class="riskitem" style="background:red" title="70-100 极度风险"></div>
+                                                    </div>
+                    </div>
+                </div>
+                                <div class="line line-nativeip">
+                    <div class="name">
+                        <span>原生 IP</span>
+                        <a class="fielddesc" style="margin-left: 10px;font-size: 10px;color:deepskyblue;" 
+                        href="https://ping0.cc/ip/faq#nativeip" target="_blank"
+                        title="绝大部分的家庭宽带 IP 都属于原生 IP，部分当地的本地 IDC 提供商也会使用原生 IP。
+而一些全球性的跨国 IDC 服务商(AWS、GCP、Azure 等)为了方便管理，通常会购买一些大的 IP 段，然后广播到不同的国家, 这些即为 广播 IP。
+所以，当一个 IP 显示为 原生 IP 时，通常代表这是一个家庭宽带 IP 或者本地 IDC提供商 IP。
+当一个 IP 显示 为广播 IP 时，通常代表这是一个 非家庭宽带 IP，非本地 IDC 提供商 IP。">(说明?)</a>
+                        </span>
+                    </div>
+                    <div class="content">
+                                                <span class="label orange" style="background:limegreen;">原生 IP</span>
+                                            </div>
+                </div>
+                
+                <div class="line line-aicheck">
+                    <div class="name">
+                        <span>大模型检测</span>
+                        <a class="fielddesc" style="margin-left: 10px;font-size: 10px;color:deepskyblue;" 
+                        href="https://ping0.cc/ip/faq#aicheck" target="_blank"
+                        title="使用AI大模型来判断是否为家庭宽带，该模型，基于 qwen2.5-0.5b 模型，使用1000多万条IP数据进行微调训练所得。大模型判断的结果仅供参考，准确率未知, 请自行判断。">(说明?)</a>
+                        </span>
+                    </div>
+                    <div class="content">
+                        <div v-if="aicheck" v-html="aicheck"></div>
+                        <a class="" @click="doaicheck"
+                        style="color: deepskyblue;
+                        text-decoration: none;
+                        cursor: pointer;
+                        padding-bottom: 1px;
+                        border-bottom: 1px solid deepskyblue;" v-else>
+                            {{ aichecktext === '点击检测' ? '点击检测' : '正在检测' }}
+                        </a>
+                    </div>
+                </div>
+
+                <div class="line ipnum" style="margin:0 -1px 0 -1px;">
+                    <div class="name">
+                        IP 地址(数字)                    </div>
+                    <div class="content">
+                        <span style="margin-right: 5px;display: inline-block;width:80px;">{{ showipnum ? ipnum : '********' }}</span>
+                        <img :src="showipnum ? '/static/images/show.png' : '/static/images/hide.png'" alt="" @click="showipnum=!showipnum" style="width:auto;">
+                    </div>
+                </div>
+
+                                <div class="line line-usecount">
+                    <div class="name">
+                        <span>共享人数                            <a class="fielddesc" style="margin-left: 10px;font-size: 10px;color:deepskyblue;"
+                            href="https://ping0.cc/ip/faq#usecount" target="_blank"
+                            title="该 IP 过去一年的使用人数，基于全网大数据监控的估算值，可以判断该 IP 有多少个人一起使用。">(说明?)</a>
+                        </span>
+                    </div>
+                    <div class="content">
+                        <div class="usecountbar" usecount="10 - 100 (一般)" title="1-10(极好), 10-100(一般), 100-1000(风险), 1000-10000(高危), 10000+(极度风险)">
+                        10 - 100 (一般)                        </div>
+                    </div>
+                </div>
+                            </div>
+        </div>
+        
+        <div class="xxeles">
+                        <a rel="noopener nofollow" href="https://bestproxy.com/?keyword=ijllppba" target="_blank" style="display:block; position: relative;" @click="trackad(9)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/ae2c0d87898528db4825dd7af4c86d81.gif" width="100%" style="max-height: 100%;">
+            </a>
+                        <a rel="noopener nofollow" href="https://www.vircs.com/promotion?code=4" target="_blank" style="display:block; position: relative;" @click="trackad(5)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/189722caa53bcad8d2e7c2e0e1048d5f.gif" width="100%" style="max-height: 100%;">
+            </a>
+                        <a rel="noopener nofollow" href="https://tothost.vn/zh/hi5tot-vps?utm_source=ping0&utm_medium=CPC&utm_campaign=hi5tot&utm_content=-zh-hi5tot-vps" target="_blank" style="display:block; position: relative;" @click="trackad(10)">
+                <span class="closead">关闭</span>
+                <span class="tipad">广告</span>
+                <img src="https://cdn.ping0.cc/images/ax/b8b68c2b1f5fb0ecade1c28285cb7228.gif" width="100%" style="max-height: 100%;">
+            </a>
+                    </div>
+
+        
+        <div class="asninfo prefixes" style="margin-top: 0px;">
+            <div class="title">
+                <div>
+                    <img src="/static/images/lead.png" alt="">ASN 历史                </div>
+                <div>
+                    CIDR
+                </div>
+                <div>信息</div>
+                <div>国家</div>
+                <div>首次出现</div>
+                <div>最近活跃 <span title="ping0.cc 通过监控ASN/BGP通告数据来进行IP定位数据更新，最近活跃指的是最近监控到相关 prefix 的活跃通告时间"
+                                style="font-size: 12px;color:#ddd;">说明?</span></div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                    
+                    <a href="https://ping0.cc/as/AS4760" target="_blank">AS4760</a>
+                </div>
+                <div>
+                    1.65.224.0/19                </div>
+                <div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div>
+                                        -
+                                    </div>
+                <div>
+                    📅 2026-03-09 20:27                </div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                    
+                    <a href="https://ping0.cc/as/AS4760" target="_blank">AS4760</a>
+                </div>
+                <div>
+                    1.65.0.0/16                </div>
+                <div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div>
+                                        -
+                                    </div>
+                <div>
+                    📅 2026-03-09 20:27                </div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                    
+                    <a href="https://ping0.cc/as/AS4760" target="_blank">AS4760</a>
+                </div>
+                <div>
+                    1.64.0.0/15                </div>
+                <div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div>
+                                        -
+                                    </div>
+                <div>
+                    📅 2026-03-09 20:27                </div>
+            </div>
+                        <div class="line invalid">
+                <div>
+                                        <div class="invalid" title="当前无效"></div>
+                    
+                    <a href="https://ping0.cc/as/AS4760" target="_blank">AS4760</a>
+                </div>
+                <div>
+                    1.65.248.0/21                </div>
+                <div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div>
+                                        📅 2023-05-10 20:28                </div>
+                <div>
+                    📅 2026-03-02 20:26                </div>
+            </div>
+                    </div>
+        <div class="asninfomobile prefixes" style="margin-top: 10px;">
+            <div class="title">
+                <img src="/static/images/lead.png" alt="">ASN 历史            </div>
+                        <div class="item valid" >
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                                AS4760                    </div>
+                    <div>
+                        1.65.224.0/19                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                                                        -
+                                                    </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 20:27                        </div>
+                    </div>
+                </div>
+            </div>
+                        <div class="item valid" >
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                                AS4760                    </div>
+                    <div>
+                        1.65.0.0/16                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                                                        -
+                                                    </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 20:27                        </div>
+                    </div>
+                </div>
+            </div>
+                        <div class="item valid" >
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                                AS4760                    </div>
+                    <div>
+                        1.64.0.0/15                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                                                        -
+                                                    </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 20:27                        </div>
+                    </div>
+                </div>
+            </div>
+                        <div class="showinvalidwrap"><div class="showinvalid" onclick="document.querySelectorAll('.asninfomobile.prefixes .item.invalid').forEach(function(el) { el.style.display = window.getComputedStyle(el).display === 'none' ? 'block' : 'none'; });this.innerText = this.innerText === '↑ 隐藏非活跃记录' ? '↓ 显示非活跃记录' : '↑ 隐藏非活跃记录'">↓ 显示非活跃记录</div></div>
+                                    <div class="item invalid" >
+                <div class="asn">
+                    <div class="num">
+                                                <div class="invalid" title="当前无效"></div>
+                                                AS4760                    </div>
+                    <div>
+                        1.65.248.0/21                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                                                        📅2023-05-10 20:28                        </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-02 20:26                        </div>
+                    </div>
+                </div>
+            </div>
+                    </div>
+        
+        <div class="xxeles" style="display: none;">
+            <a rel="noopener nofollow" href="" target="_blank" style="display:block; flex: 1;position: relative;" @click="trackad(2)">
+            </a>
+            <a rel="noopener nofollow" target="_blank" style="display:block; flex: 1;position: relative;">
+                
+            </a>
+            <a rel="noopener nofollow" target="_blank" style="display:block; flex: 1;position: relative;">
+                
+            </a>
+        </div>
+
+        <div class="asninfomobile orgs" style="margin-top: 0;">
+            <div class="title">
+                <img src="/static/images/lead.png" alt="">企业历史            </div>
+                        <div class="item valid">
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                            </div>
+                    <div>
+                        1.65.0.0/16                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        Hong Kong Telecommunications (HKT) Limited Mass Internet &mdash; hkt.com                </div>
+                
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                            📅2021-01-27 21:20                        </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 16:33                        </div>
+                    </div>
+                </div>
+            </div>
+                        <div class="item valid">
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                            </div>
+                    <div>
+                        1.64.0.0/15                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited &mdash; pccw.com                </div>
+                
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                            📅2020-07-07 13:22                        </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 16:33                        </div>
+                    </div>
+                </div>
+            </div>
+                        <div class="item valid">
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                            </div>
+                    <div>
+                        1.0.0.0/8                    </div>
+                </div>
+                <div class="name">
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        Asia Pacific Network Information Center, Pty. Ltd. &mdash; apnic.net                </div>
+                
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                            📅2010-12-17 01:17                        </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 16:33                        </div>
+                    </div>
+                </div>
+            </div>
+                    </div>
+                <div class="asninfo orgs">
+            <div class="title">
+                <div>
+                    <img src="/static/images/lead.png" alt="">企业历史                </div>
+                <div>
+                    CIDR
+                </div>
+                <div>首次出现</div>
+                <div>最近活跃 <span title="ping0.cc 通过监控ASN/BGP通告数据来进行IP定位数据更新，最近活跃指的是最近监控到相关信息的活跃通告时间"
+                                style="font-size: 12px;color:#ddd;">说明?</span></div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        Hong Kong Telecommunications (HKT) Limited Mass Internet &mdash; hkt.com                </div>
+                <div>
+                    1.65.0.0/16                </div>
+                <div>
+                    📅 2021-01-27 21:20                </div>
+                <div>
+                    📅 2026-03-09 16:33                </div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        PCCW IMS Limited &mdash; pccw.com                </div>
+                <div>
+                    1.64.0.0/15                </div>
+                <div>
+                    📅 2020-07-07 13:22                </div>
+                <div>
+                    📅 2026-03-09 16:33                </div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                                        <span class="tiny label orange" style="background:limegreen;" title="ISP">ISP</span>
+                                        Asia Pacific Network Information Center, Pty. Ltd. &mdash; apnic.net                </div>
+                <div>
+                    1.0.0.0/8                </div>
+                <div>
+                    📅 2010-12-17 01:17                </div>
+                <div>
+                    📅 2026-03-09 16:33                </div>
+            </div>
+                    </div>
+                <div class="asninfomobile rirs" style="margin-top: 0;">
+            <div class="title">
+                <img src="/static/images/lead.png" alt="">注册地历史            </div>
+                        <div class="item valid">
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                            </div>
+                    <div>
+                        1.64.0.0/15                    </div>
+                </div>
+                
+                <div class="country">
+                    <div>
+                        <img src="/static/images/flags/hk.png" alt="">
+                        香港                    </div>
+                    <div>
+                        <img src="/static/images/apnic.png" alt="">
+                        APNIC                    </div>
+                </div>
+                
+                <div class="times">
+                    <div>
+                        <div class="title">首次出现:</div>
+                        <div class="time">
+                            📅2010-06-30 00:00                        </div>
+                    </div>
+                    <div>
+                        <div class="title">最近活跃:</div>
+                        <div class="time">
+                            📅2026-03-09 00:00                        </div>
+                    </div>
+                </div>
+            </div>
+                    </div>
+                <div class="asninfo prefixes rirs">
+            <div class="title">
+                <div>
+                    <img src="/static/images/lead.png" alt="">注册地历史                </div>
+                <div>
+                    注册局                </div>
+                <div>
+                    国家                </div>
+                <div>首次出现</div>
+                <div>最近活跃</div>
+            </div>
+                        <div class="line valid">
+                <div>
+                                        <div class="valid" title="当前有效"></div>
+                                        1.64.0.0/15                </div>
+                <div class="country">
+                    <img src="/static/images/apnic.png" alt="">
+                    APNIC                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    香港                </div>
+                <div>
+                    📅 2010-06-30 00:00                </div>
+                <div>
+                    📅 2026-03-09 00:00                </div>
+            </div>
+                    </div>
+        
+        <div class="asninfo prefixes geohistory" style="margin-top: 30px;">
+            <div class="title">
+                <div>
+                    <img src="/static/images/lead.png" alt="">IP 位置历史                </div>
+                <div>位置</div>
+                <div>时间</div>
+            </div>
+                        <div class="line valid">
+                <div>
+                    <div class="valid"></div>
+                    1.65.250.0/24                </div>
+                <div class="country">
+                    <img src="/static/images/flags/hk.png" alt="">
+                    中国 香港香港                </div>
+                <div>
+                    📅 -                </div>
+            </div>
+                    </div>
+
+        <div class="asninfomobile geohistory" style="margin-top: 0;">
+            <div class="title">
+                <img src="/static/images/lead.png" alt="">IP 位置历史            </div>
+                        <div class="item valid">
+                <div class="asn">
+                    <div class="num">
+                                                <div class="valid" title="当前有效"></div>
+                                            </div>
+                    <div>
+                        1.65.250.0/24                    </div>
+                </div>
+                
+                <div class="country">
+                    <div>
+                        <img src="/static/images/flags/hk.png" alt="">
+                        中国 香港香港                    </div>
+                </div>
+                
+                <div class="times">
+                    <div>
+                        <div class="title">时间:</div>
+                        <div class="time">
+                            📅 -                        </div>
+                    </div>
+                </div>
+            </div>
+                    </div>
+
+        <div class="asninfo">
+            <div class="title">
+                <div>
+                    <img src="/static/images/lead.png" alt="">地图定位                </div>
+            </div>
+            <div  id="bdmap">
+
+            </div>
+        </div>
+
+        <div class="asninfo bgphistory" style="margin-top: 30px;">
+            <div class="title" style="justify-content: space-between;">
+                <div>
+                    <img src="/static/images/lead.png" alt="">BGP 拓扑历史                </div>
+                <div class="desc" style="width:auto;">
+                    <a class="fielddesc" style="margin-left: 10px;font-size: 10px;color:deepskyblue;"
+                            href="https://ping0.cc/ip/faq#bgphistory" target="_blank"
+                            >说明?</a>
+                </div>
+            </div>
+            <div class="line valid history">
+                        </div>
+                        <div class="latest">
+                <img src="https://cdn.ping0.cc/bgp/prefix/43/6e/22628bcf.png" alt="" onclick="bgpimgClick(event)">
+            </div>
+                    </div>
+        
+        <div class="asninfo otherinfo-switch">
+            <div :class="['switch', otherinfotab=='all' ? 'active' : '']" @click="otherinfotab='all'">显示所有</div>
+            <div :class="['switch', otherinfotab=='idc' ? 'active' : '']" @click="otherinfotab='idc'">显示 IDC</div>
+        </div>
+        <div class="asninfo oterinfo" style="margin-top: 0;" v-if="otherinfotab=='all'">
+            <div class="title" style="border-radius: 0;border-top:0;">
+                <div>
+                    <img src="/static/images/lead.png" alt="">同机房供应商 / 客户                </div>
+                <div>信息</div>
+            </div>
+                        <div class="line">
+                <div>
+                    ADWEN ENGINEERING (CHINA) LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Amerseas Enterprises Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Asia Commerical Bank                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    BLUE COAT SYSTEMS HK LIMITED                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Britestone Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    CHIN YIU ADV PRODUCTS DESIGN CO LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Capital Distribution Services Limited                </div>
+                <div>
+                                        imsbiz.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Cloud Innovation Ltd                </div>
+                <div>
+                                        <span class="mini label orange">IDC</span>
+                                        cloudinnovation.org                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    DS-MAX Hong Kong Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Damrak Co Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    EDUCATIONAL PUBLISHING HOUSE LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Evengreen Star                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Fountain Set (Holdings) Ltd                </div>
+                <div>
+                                        fshl.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Game Forever Group                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Gap International Sourcing                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Golin/Harris International ltd                </div>
+                <div>
+                                        imsbiz.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    HK CSL Ltd                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    HKT Limited                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        hkt.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    HKT Mobile Service                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Hecny Transportation Ltd                </div>
+                <div>
+                                        hecny.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Hong Kong Telecommunications (HKT) Limited                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        hkt.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Hong Kong Telecommunications (HKT) Limited (CSL Limited)                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        hkt.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Hong Kong Telecommunications (HKT) Limited Business Internet                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        hkt.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Hong Kong Telecommunications (HKT) Limited Mass Internet                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        hkt.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Hong Kong Telecommunications HKT Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    INFO WISE MANAGEMENT LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    IP address for @sma                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    J.Welten Thompson Co Ltd                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    JUPITER GLOBAL LIMITED                </div>
+                <div>
+                                        juahkg.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Jebsen &amp; Co Ltd                </div>
+                <div>
+                                        pccw.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    LE SAUNDA MANAGEMENT LTD                </div>
+                <div>
+                                        grandmarkholdings.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Leo Burnett Ltd                </div>
+                <div>
+                                        leoburnett.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Maginet Interactive Ltd                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Mindshare Hong Kong Limited                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    NATURALLY PLUS HONGKONG CO LIMITED                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Netvigator                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Newport Express (HK)                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Oriental Press Group Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    PCCW Global, Inc.                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        pccw.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    PCCW IMS Ltd (PCCW Business Internet Access)                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        pccw.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    PCCW Limited                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        pccw.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    PERFEKTA ENTERPRISES LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Perception Digital Ltd.                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Perfecta Dyeing Printing &amp; Weaving Work Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    REGUS HK MANAGEMENT LIMITED                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Rogers Southeast Asia Inc                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    SMART GARMENT LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Shun Loong Online Investment Services (HK) Ltd                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    South Asia Group                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    TARGET WARCRAFT CYBER LIMITED                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    THE CHURCH OF JESUS CHRIST OF LATTER-DAY                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    THE THOMSON CORPORATION HONG KONG LTD                </div>
+                <div>
+                                        netvigator.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Tech-trans Telecom Ltd                </div>
+                <div>
+                                        tech-trans.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    The Personal Computer Centre Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Tradelink Electronic Commerce Ltd.                </div>
+                <div>
+                                        imsbiz.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Tyco Healthcare (HKSAR) Ltd                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    Union Industrial (Far East) Ltd                </div>
+                <div>
+                                        imsbiz.com                </div>
+            </div>
+                        <div class="line">
+                <div>
+                    VDC Powerbase Hong Kong Data Centers Limited                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    WAN (CORPORATE SERVICES)LTD                </div>
+                <div>
+                                                        </div>
+            </div>
+                        <div class="line">
+                <div>
+                    WILBUR INDUSTRIAL LTD                </div>
+                <div>
+                                        pccw.com                </div>
+            </div>
+                    </div>
+        <div class="asninfo oterinfo" style="margin-top: 0;" v-if="otherinfotab=='idc'">
+            <div class="title" style="border-radius: 0;border-top:0;">
+                <div>
+                    <img src="/static/images/lead.png" alt="">同机房供应商 / 客户                </div>
+                <div>信息</div>
+            </div>
+                                                                                                            <div class="line">
+                <div>
+                    Cloud Innovation Ltd                </div>
+                <div>
+                                        <span class="mini label orange">IDC</span>
+                                        cloudinnovation.org                </div>
+            </div>
+                                                                                                                                                                                                                        <div class="line">
+                <div>
+                    Hong Kong Telecommunications (HKT) Limited Mass Internet                </div>
+                <div>
+                                        <span class="mini label orange" style="background:limegreen;">ISP</span>
+                                        hkt.com                </div>
+            </div>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                </div>
+        <div class="xxeles">
+            <div rel="noopener nofollow"  target="_blank" style="display:flex; align-items: center;justify-content: center;position: relative;" >
+               
+               <!-- <ins class="adsbygoogle"
+                    style="display:inline-block;width:320px;height:70px"
+                    data-ad-client="ca-pub-4408350776179053"
+                    data-ad-slot="4051400348"></ins>
+                <script>
+                    (adsbygoogle = window.adsbygoogle || []).push({});
+                </script>-->
+            </div>
+            <div rel="noopener nofollow"  target="_blank" style="display:flex; align-items: center;justify-content: center;position: relative;" >
+                <!--<ins class="adsbygoogle"
+                    style="display:inline-block;width:320px;height:70px"
+                    data-ad-client="ca-pub-4408350776179053"
+                    data-ad-slot="7771153506">
+                </ins>
+                <script>
+                    (adsbygoogle = window.adsbygoogle || []).push({});
+                </script>-->
+            </div>
+            <div rel="noopener nofollow"  target="_blank" style="display:flex; align-items: center;justify-content: center;position: relative;" >
+                <!--<ins class="adsbygoogle"
+                    style="display:inline-block;width:320px;height:70px"
+                    data-ad-client="ca-pub-4408350776179053"
+                    data-ad-slot="6217526542"></ins>
+                <script>
+                    (adsbygoogle = window.adsbygoogle || []).push({});
+                </script>-->
+            </div>
+        </div>
+        <div class="nextip">
+            <a href="/ip/1.65.249.176" target="_blank" style="padding-right: 30px;">
+                <img style="align-self: flex-start;width: 34px;height: 34px;margin-right: 30px;" src="/static/images/arrow_left.png" alt=""/> 
+                1.65.249.176            </a>
+            <a href="/ip/1.65.251.176" target="_blank" style="padding-left:30px;">
+                1.65.251.176                <img style="align-self: flex-end; width: 34px; height: 34px;margin-left: 30px;" src="/static/images/arrow_right.png" alt="" />
+              </a>
+        </div>
+        <div style="border-top: 1px solid #f0f0f0;margin-top: 50px;" id="websites-wrap">
+            <p style="height: 24px;line-height: 24px;margin-bottom: 0;margin-left:15px; border-bottom: 1px dashed;padding-bottom: 10px;">网站大全</p>
+            <div class="websites">
+                                <a href="https://www.quanqiudaili.com/?ref=distping0" target="_blank" rel="noopener nofollow sponsored" @click="trackad(1002)" title="全球领先的代理IP服务提供商，企业级代理IP解决方案，覆盖全球200多个国家和地区的代理资源。根据您的业务需求，精准定制独享代理IP，拥有极致性价比的服务，平台专注于为企业提供全面、专业、完善的一站式解决方案，全方位满足跨境电商和社交媒体营销的各类需求。全球代理IP日新增50000+纯净住宅IP，高效，稳定，支持免费测试，API/账密一键提取，动静态住宅，数据中心任您选择，支持1V1定制量身打造解决方案，公司售后团队7×24小时保驾护航，支持免费测试。目前服务5000多家公司与个人，获得广泛好评！">
+                    <img src="https://cdn.ping0.cc/images/ax/subset/2fe2b11e6227339155287b02da2fc0b8.jpg" alt="">
+                </a>
+                                <a href="https://www.quarkip.com/tc/?utm_source=ping0" target="_blank" rel="noopener nofollow sponsored" @click="trackad(1003)" title="我们提供从未使用过的、独享代理 IP， 支持静态/动态住宅及数据中心代理，覆盖全球 200+ 国家地区，全天真人客服在线沟通。立即领取 200MB 免费流量，限时福利！">
+                    <img src="https://cdn.ping0.cc/images/ax/subset/86a8d4cccb728bab9dddce2901e04959.png" alt="">
+                </a>
+                                <a href="https://www.instaip.net/?source=ping0" target="_blank" rel="noopener nofollow sponsored" @click="trackad(1004)" title="Insta IP 提供高性价比的纯净独享静态住宅 IP 和tiktok直播专线，适用于社媒矩阵、店群养号、涨粉引流等多种场景，助力跨境商家拓展全球市场。">
+                    <img src="https://cdn.ping0.cc/images/ax/subset/417d1d71a680857961d06af7e35bce91.jpg" alt="">
+                </a>
+                                <a href="https://www.tkyds.com/?=p0" target="_blank" rel="noopener nofollow sponsored" @click="trackad(1006)" title="Tiktok矩阵管理系统, 专业级人工智能驱动的TikTok账号自动化批量管理平台，实现多账号矩阵式管理与全自动批量化运营，让您的TikTok业务轻松扩展。">
+                    <img src="https://cdn.ping0.cc/images/ax/subset/5088dd70e71f73cce0354031202a5619.png" alt="">
+                </a>
+                                <a href="https://www.ipfoxy.net/?r=ping0cc" target="_blank" rel="noopener nofollow sponsored" @click="trackad(1007)" title="全球领先代理IP服务，提供纯净独享的静态住宅IP、数据中心IP、动态住宅7000W代理IP池，高速稳定，免费试用。">
+                    <img src="https://cdn.ping0.cc/images/ax/subset/6e580e53ef140296260b34167e53ab52.png" alt="">
+                </a>
+                                <a href="https://www.unoproxy.net/?source=ping0" target="_blank" rel="noopener nofollow sponsored" @click="trackad(1008)" title="UnoProxy 提供覆盖全球的高匿名、高速度代理IP服务，支持住宅IP、ISP代理、静态与动态IP，轻松应对多账号管理、网络爬虫、电商防封等场景，助力用户高效出海与数据采集。">
+                    <img src="https://cdn.ping0.cc/images/ax/subset/67f4dd52a15901223f9314e86632102a.jpg" alt="">
+                </a>
+                            </div>
+        </div>
+        
+    </div>
+    <div id="error_report" v-show="errorreport" style="display: none;">
+        <div class="title">错误提交</div>
+        <div class="close" @click="closeErrorReport">X</div>
+        <div>
+            <div class="line">
+                <div>IP 地址:</div>
+                <div style="color:#aaa;">1.65.250.176</div>
+            </div>
+            <div class="line">
+                <div>IP 位置:</div>
+                <div style="color:#aaa;">中国 香港 香港</div>
+            </div>
+            <div class="line line-newaddr">
+                <div><span style="color:red;margin-right: 3px;">*</span>正确的IP位置:</div>
+                <div><input type="text" v-model="newaddr" placeholder="请输入正确的IP位置" /></div>
+            </div>
+            <div class="line line-other">
+                <div>其它说明:</div>
+                <div><input type="text" v-model="otherinfo" placeholder="空"/></div>
+            </div>
+        </div>
+        <div class="btnreport" @click="submitErrorReport">提交</div>
+    </div>
+    
+    <textarea id="copy" style="width: 1px;height: 1px;opacity: 0;position: absolute;" v-model="copydata" ref="copyele">
+
+    </textarea>
+</div>
+
+<script type="text/javascript">
+    window.ip = '1.65.250.176'
+    window.tar= ''
+    window.ipnum = '21101232'
+    window.asndomain = 'pccw.com'
+    window.orgdomain = 'hkt.com'
+    window.rdns = ''
+    window.longitude = '114.1747'
+    window.latitude = '22.2783'
+    window.loc = `中国 香港 香港`
+
+    
+</script>
+<link rel="stylesheet" href="https://cdn.ping0.cc/js/maplibre-gl.css" />
+<script src="https://cdn.ping0.cc/js/maplibre-gl.js"></script>
+<script src="https://cdn.ping0.cc/js/check.js"></script>
+<script type="text/javascript" src="https://ipv6.ping0.cc/geo/jsonp/ipv6cb"></script>
+<script>
+    function bgpimgClick(event) {
+        const clickedImg = event.currentTarget;
+        document.querySelectorAll('.bgphistory > .history img, .bgphistory > .latest img')
+          .forEach(img => {
+            if (img !== clickedImg) {
+              img.classList.remove('zoomed');
+            }
+          });
+        clickedImg.classList.toggle('zoomed');
+      }
+    // ========== 圣诞节首页装饰脚本开始 - 可在圣诞节后删除此部分 ==========
+    (function() {
+        // 检测是否为移动端
+        function isMobile() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+                || window.innerWidth < 768;
+        }
+        
+        // 如果是移动端，不显示圣诞节效果
+        if (isMobile()) {
+            return;
+        }
+        
+        var now = new Date();
+        var month = now.getMonth() + 1;
+        if (month !== 12) {
+            return;
+        }
+        
+        function initHomeChristmas() {
+            var checkElement = document.getElementById('check');
+            if (checkElement) {
+                checkElement.classList.add('christmas-mode');
+            }
+
+            var searchElement = document.querySelector('#check .search');
+            if (searchElement) {
+                var leftTree = document.createElement('div');
+                leftTree.className = 'christmas-search-tree left';
+                searchElement.appendChild(leftTree);
+
+                var rightTree = document.createElement('div');
+                rightTree.className = 'christmas-search-tree right';
+                searchElement.appendChild(rightTree);
+            }
+        }
+        
+        // 等待DOM加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initHomeChristmas);
+        } else {
+            initHomeChristmas();
+        }
+    })();
+    // ========== 圣诞节首页装饰脚本结束 ==========
+    
+    document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.closead').forEach(function(element) {
+        element.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.parentNode.style.visibility = 'hidden';
+        });
+    })
+    var width = document.documentElement.clientWidth
+    if (width < 700) {
+        const rows = document.querySelectorAll('.xxeles');
+        rows.forEach(row => {
+            const links = row.querySelectorAll('a');
+            const validLinks = Array.from(links).filter(link => link.querySelector('img') !== null);
+            links.forEach(link => link.style.display = 'none');
+            if (validLinks.length > 0) {
+                const randomIndex = Math.floor(Math.random() * validLinks.length);
+                validLinks[randomIndex].style.display = 'flex';
+            }
+        });
+    }
+    else if (width < 1100) {
+        const rows = document.querySelectorAll('.xxeles');
+        rows.forEach(row => {
+            const links = row.querySelectorAll('a');
+            const validLinks = Array.from(links).filter(link => link.querySelector('img') !== null);
+            links.forEach(link => link.style.display = 'none');
+
+            if (validLinks.length >= 2) {
+                const shuffled = [...validLinks].sort(() => Math.random() - 0.5);
+                shuffled.slice(0, 2).forEach(link => {
+                    link.style.display = 'flex';
+                });
+            } else if (validLinks.length === 1) {
+                validLinks[0].style.display = 'flex';
+                links[2].style.display = 'flex';
+            }
+        })
+    }
+    });
+</script>
+<style>
+    .bottommenu{
+        display: none;
+    }
+    .bottommenu a{
+        color: #fff;
+        display: block;
+        text-align: left;
+        text-decoration: none;
+        height: 40px;
+        line-height: 40px;
+    }
+    .footer{
+    }
+    .footer-menu{
+        padding: 30px;
+        display:flex;
+        justify-content:space-between;
+    }
+    .footer-menu>.menu-column{
+        display: flex;
+        flex-direction: column;
+    }
+    .menu-column>.mtitle{
+        color: #fff;
+        font-size: 14px;
+        margin-bottom: 15px;
+    }
+    .menu-column>a {
+        color: #ccc;
+        height: 30px;
+        line-height: 30px;
+        text-decoration: none;
+        font-size: 12px;
+    }
+    .menu-column>a:hover{
+        text-decoration: underline;
+    }
+
+    @media screen and (max-width: 1200px){
+        .bottommenu {
+            display: flex;
+            justify-content: space-around;
+        }
+        .footer-menu{
+            display: none;
+        }
+    }
+    @media screen and (max-width: 500px) {
+        .footer{
+            height: auto;
+            line-height: 30px;
+        }
+    }
+
+</style>
+<div class="bottommenu" style="background: #333;width: 100%;color:#f0f0f0;text-align: center;">
+    <div>
+        <a href="https://ping0.cc/vpsmon/24hour">
+            近24小时
+        </a>
+        <a href="https://ping0.cc/vpsmon/5day">
+            近5天
+        </a>
+        <a href="https://ping0.cc/vpsmon/30day">
+            近一个月
+        </a>
+        <a href="https://ping0.cc/vpsmon/300day">
+            近一年
+        </a>
+    </div>
+   <div>
+       <a href="https://ip.ping0.cc">
+           IP 查询
+           <sup style="color:red;margin-left: 2px;">Hot</sup>
+       </a>
+       <a href="http://ping0.cc/ping">
+           PING 检测
+           <sup style="color:red;margin-left: 2px;">New</sup>
+       </a>
+
+       <a href="https://ping0.cc/trace">
+           TRACE 跟踪
+           <sup style="color:red;margin-left: 2px;">New</sup>
+       </a>
+       <a href="https://ping0.cc/Ip/asnmon">
+           ASN 变化监控
+       </a>
+       <a href="https://ping0.cc/ip/api">
+           API接口
+       </a>
+   </div>
+</div>
+<div class="footer" style="background: #333;width: 100%;color:#f0f0f0;">
+    <div class="container footer-menu">
+        <div class="menu-column">
+            <span class="mtitle">IP 查询</span>
+            <a href="https://ping0.cc" target="_blank">IP 查询</a>
+        </div>
+        <div class="menu-column">
+            <span class="mtitle">IP 反查</span>
+            <a href="https://ping0.cc/reverse" target="_blank">IP 反查域名</a>
+            <a href="https://ping0.cc/reverse" target="_blank">rDNS 批量查询</a>
+            <a href="https://ping0.cc/reverse" target="_blank">rDNS 反查</a>
+            <a href="https://ping0.cc/reverse" target="_blank">CNAME 反查</a>
+        </div>
+        <div class="menu-column">
+            <span class="mtitle">常用功能</span>
+            <a  href="http://ping0.cc/latency" target="_blank">Latency</a>
+            <a  href="http://ip.ping0.cc/ping" target="_blank">Ping</a>
+            <a href="https://ping0.cc/trace" target="_blank">Trace</a>
+            <a href="https://ping0.cc/Ip/asnmon" target="_blank">ASN 变化监控</a>
+            <a  href="http://ipv4.ping0.cc/ipleak" target="_blank">IP Leak 检测</a>
+            
+        </div>
+        
+        <div class="menu-column vpsmon">
+            <span class="mtitle">小鸡监控</span>
+                <a  href="https://ping0.cc/vpsmon/24hour" target="_blank">近24小时</a>
+                <a href="https://ping0.cc/vpsmon/5day" target="_blank">近5天</a>
+                <a href="https://ping0.cc/vpsmon/30day" target="_blank">近一个月</a>
+                <a href="https://ping0.cc/vpsmon/300day" target="_blank">近一年</a>
+        </div>
+        <div class="menu-column">
+            <span class="mtitle">API 接口</span>
+            <a  href="https://ping0.cc/ip/api" target="_blank">API接口</a>
+        </div>
+        <div class="menu-column">
+            <span class="mtitle">联系我们</span>
+            <a  href="https://t.me/heyxiun" target="_blank">广告位联系: https://t.me/heyxiun</a>
+        </div>
+    </div>
+    <div class="end container" style="text-align: center;border-top: 1px solid #444;padding: 30px 0;color: #aaa;">
+        © 2021 - 2026 ping0.cc 所有权利保留 | 广告位联系: https://t.me/heyxiun
+    </div>
+    
+</div>
+</body>
+</html>

@@ -234,6 +234,29 @@ func TestManager_Load_InferSource_BackCompat(t *testing.T) {
 	}
 }
 
+func TestManager_Load_EnsuresCustomSubscription(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+
+	m := NewManager()
+	if err := m.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	custom, ok := m.Get(CustomSubscriptionID)
+	if !ok || custom == nil {
+		t.Fatalf("expected reserved Cus subscription to exist after load")
+	}
+	if custom.Name != CustomSubscriptionName {
+		t.Fatalf("expected custom name %q, got %q", CustomSubscriptionName, custom.Name)
+	}
+	if custom.Source != SourceCustom {
+		t.Fatalf("expected custom source %q, got %q", SourceCustom, custom.Source)
+	}
+	if err := m.Delete(CustomSubscriptionID); err == nil {
+		t.Fatalf("expected Cus deletion to be rejected")
+	}
+}
+
 func TestManager_AddManual_Load_Update(t *testing.T) {
 	t.Setenv("CLASH4CLI_HOME", t.TempDir())
 
@@ -297,6 +320,50 @@ func TestManager_AddManual_Load_Update(t *testing.T) {
 	}
 	if got2.Nodes[0].Name != "N1" || got2.Nodes[1].Name != "N2" {
 		t.Fatalf("expected manual refresh node names [N1 N2], got [%s %s]", got2.Nodes[0].Name, got2.Nodes[1].Name)
+	}
+}
+
+func TestManager_CustomNodesCRUD(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+
+	m := NewManager()
+	if err := m.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	added, err := m.AddCustomNodes("vless://52765b6a-1bba-4291-a3c7-281285df13f1@crazyland.zsh2401.top:32612?type=tcp&encryption=none&path=%2F&headerType=http&security=none#luvjqzgb\n")
+	if err != nil {
+		t.Fatalf("AddCustomNodes: %v", err)
+	}
+	if len(added) != 1 {
+		t.Fatalf("expected 1 custom node added, got %d", len(added))
+	}
+	nodes := m.GetNodesForSubscription(CustomSubscriptionID)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 stored custom node, got %d", len(nodes))
+	}
+	if got := nodes[0].Settings["network"]; got != "http" {
+		t.Fatalf("expected stored custom VLESS network=http, got %#v", got)
+	}
+
+	updated, err := m.UpdateCustomNode(nodes[0], "vless://550e8400-e29b-41d4-a716-446655440000@example.com:8443?encryption=none&security=tls&type=ws&path=%2Fws#My%20VLESS\n")
+	if err != nil {
+		t.Fatalf("UpdateCustomNode: %v", err)
+	}
+	if updated.Name != "My VLESS" {
+		t.Fatalf("expected updated name My VLESS, got %q", updated.Name)
+	}
+
+	nodes = m.GetNodesForSubscription(CustomSubscriptionID)
+	if len(nodes) != 1 || nodes[0].Name != "My VLESS" {
+		t.Fatalf("expected updated custom node to persist, got %#v", nodes)
+	}
+
+	if err := m.DeleteCustomNode(nodes[0]); err != nil {
+		t.Fatalf("DeleteCustomNode: %v", err)
+	}
+	if got := m.GetNodesForSubscription(CustomSubscriptionID); len(got) != 0 {
+		t.Fatalf("expected custom nodes to be empty after delete, got %d", len(got))
 	}
 }
 

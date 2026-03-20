@@ -24,6 +24,15 @@ nodes:
   timeout: "逾時"
   unknown: "未知"
 
+node_detail:
+  title: "節點詳情"
+  server: "伺服器"
+  settings: "設定"
+  website_tests: "網站測試"
+  testing: "測試中..."
+  not_tested: "未測試"
+  no_proxy: "沒有活躍的代理槽"
+
 subscription:
   name: "名稱"
   url: "連結"

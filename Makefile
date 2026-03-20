@@ -38,6 +38,7 @@ TARGETS := \
 .PHONY: all build clean package packages deps proxychains proxychains_all mihomo mihomo_all release linux linux_only linux_deps $(TARGETS)
 .PHONY: build_all
 .PHONY: deb deb_amd64 deb_arm64 rpm rpm_amd64 rpm_arm64 linux_pkgs
+.PHONY: npm-assemble npm-publish npm-publish-dry
 
 # Cross-platform: build all packages
 all: packages
@@ -116,6 +117,16 @@ rpm_arm64: linux/arm64
 rpm: rpm_amd64 rpm_arm64
 
 linux_pkgs: deb rpm
+
+# npm distribution
+npm-assemble:
+	@bash ./scripts/npm_assemble.sh
+
+npm-publish: npm-assemble
+	@bash ./scripts/npm_publish.sh
+
+npm-publish-dry: npm-assemble
+	NPM_DRY_RUN=1 bash ./scripts/npm_publish.sh
 
 # Cross-compile targets
 darwin/amd64:
@@ -238,6 +249,9 @@ help:
 	@echo "  make deb          Build linux .deb (amd64 + arm64) via nfpm"
 	@echo "  make rpm          Build linux .rpm (amd64 + arm64) via nfpm"
 	@echo "  make linux_pkgs   Build linux .deb + .rpm (amd64 + arm64)"
+	@echo "  make npm-assemble Assemble npm packages from dist/ into dist/npm/"
+	@echo "  make npm-publish  Assemble + publish to npm (requires NPM_TOKEN)"
+	@echo "  make npm-publish-dry  Dry-run npm publish"
 	@echo "  make release      Build+upload GitHub Release (requires GITHUB_TOKEN)"
 	@echo "  make build_all    Build tar.gz for all platforms"
 	@echo "  make clean        Remove build artifacts"

@@ -37,7 +37,7 @@ func TestGenerateConfig_ProxyGroupsOrder(t *testing.T) {
 	}
 	selected := &nodes[0]
 
-	m, err := GenerateConfig(nodes, selected, cfg, 12345, 19090, "127.0.0.1", 23456)
+	m, err := GenerateConfig(nodes, selected, cfg, 0, 12345, 19090, "127.0.0.1", 23456)
 	if err != nil {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestGenerateConfig_ProxyGroupsOrder(t *testing.T) {
 
 	// Linux-only: TUN should be present only when enabled and on linux.
 	cfg.Proxy.TunEnabled = true
-	m2, err := GenerateConfig(nodes, selected, cfg, 12345, 19090, "127.0.0.1", 0)
+	m2, err := GenerateConfig(nodes, selected, cfg, 0, 12345, 19090, "127.0.0.1", 0)
 	if err != nil {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestGenerateConfig_NoNodesNoGroups(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.AllowLan = false
 
-	m, err := GenerateConfig(nil, nil, cfg, 0, 0, "", 0)
+	m, err := GenerateConfig(nil, nil, cfg, 0, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
@@ -147,5 +147,83 @@ func TestGenerateConfig_NoNodesNoGroups(t *testing.T) {
 	}
 	if len(m.ProxyGroups) != 0 {
 		t.Fatalf("expected no proxy groups when no nodes, got %#v", m.ProxyGroups)
+	}
+}
+
+func TestGenerateConfig_SlotUpstreamUsesDialerProxy(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SetSlotUpstream(2, config.UpstreamProxyConfig{
+		Enabled:  true,
+		Protocol: "https",
+		Server:   "gateway.example.com",
+		Port:     443,
+		Username: "alice",
+		Password: "secret",
+	})
+
+	nodes := []subscription.Node{
+		{
+			Name:   "A",
+			Type:   "ss",
+			Server: "1.1.1.1",
+			Port:   1111,
+			Settings: map[string]any{
+				"cipher":   "aes-128-gcm",
+				"password": "pass",
+			},
+		},
+	}
+	selected := &nodes[0]
+
+	m, err := GenerateConfig(nodes, selected, cfg, 2, 17892, 19092, "127.0.0.1", 0)
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+
+	if len(m.Proxies) != 2 {
+		t.Fatalf("expected 2 proxies including upstream, got %d", len(m.Proxies))
+	}
+
+	var upstream map[string]any
+	for _, proxyEntry := range m.Proxies {
+		if proxyEntry["name"] == "slot-2-upstream" {
+			upstream = proxyEntry
+			break
+		}
+	}
+	if upstream == nil {
+		t.Fatalf("expected generated slot upstream proxy, got %#v", m.Proxies)
+	}
+	if upstream["type"] != "http" {
+		t.Fatalf("expected upstream type=http for https protocol, got %#v", upstream["type"])
+	}
+	if upstream["tls"] != true {
+		t.Fatalf("expected upstream tls=true, got %#v", upstream["tls"])
+	}
+	if upstream["dialer-proxy"] != "A" {
+		t.Fatalf("expected upstream dialer-proxy=A, got %#v", upstream["dialer-proxy"])
+	}
+	if upstream["username"] != "alice" || upstream["password"] != "secret" {
+		t.Fatalf("unexpected upstream credentials: %#v", upstream)
+	}
+
+	var proxyGroup *ProxyGroup
+	for i := range m.ProxyGroups {
+		if m.ProxyGroups[i].Name == "Proxy" {
+			proxyGroup = &m.ProxyGroups[i]
+			break
+		}
+	}
+	if proxyGroup == nil {
+		t.Fatalf("expected Proxy group, got %#v", m.ProxyGroups)
+	}
+	want := []string{"slot-2-upstream", "DIRECT", "REJECT"}
+	if len(proxyGroup.Proxies) != len(want) {
+		t.Fatalf("unexpected Proxy group entries: %#v", proxyGroup.Proxies)
+	}
+	for i := range want {
+		if proxyGroup.Proxies[i] != want[i] {
+			t.Fatalf("unexpected Proxy group entries: %#v", proxyGroup.Proxies)
+		}
 	}
 }

@@ -11,6 +11,7 @@ type Subscription struct {
 	// Source indicates how this subscription is provided:
 	// - "url": fetched from URL
 	// - "manual": user pasted raw content
+	// - "custom": local, user-managed nodes under the reserved "Cus" subscription
 	Source string `yaml:"source,omitempty" json:"source,omitempty"`
 	URL    string `yaml:"url,omitempty" json:"url,omitempty"`
 	// Content stores user-pasted raw subscription content (base64 / Clash YAML / SIP008 JSON).
@@ -40,6 +41,22 @@ type Node struct {
 
 // SubFormat represents the subscription format type
 type SubFormat int
+
+const (
+	CustomSubscriptionID   = "__custom__"
+	CustomSubscriptionName = "Cus"
+	SourceURL              = "url"
+	SourceManual           = "manual"
+	SourceCustom           = "custom"
+)
+
+func IsCustomSubscriptionID(id string) bool {
+	return id == CustomSubscriptionID
+}
+
+func IsCustomSubscription(sub *Subscription) bool {
+	return sub != nil && IsCustomSubscriptionID(sub.ID)
+}
 
 const (
 	FormatUnknown SubFormat = iota

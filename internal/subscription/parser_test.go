@@ -231,8 +231,49 @@ func TestParse_URIList_VLESS(t *testing.T) {
 	if n.Settings["uuid"] != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Fatalf("expected uuid, got %#v", n.Settings["uuid"])
 	}
-	if n.Settings["security"] != "tls" || n.Settings["path"] != "/ws" {
-		t.Fatalf("expected query settings, got %#v", n.Settings)
+	if n.Settings["tls"] != true {
+		t.Fatalf("expected tls=true, got %#v", n.Settings["tls"])
+	}
+	if n.Settings["network"] != "ws" {
+		t.Fatalf("expected network=ws, got %#v", n.Settings["network"])
+	}
+	wsOpts, ok := n.Settings["ws-opts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ws-opts map, got %T", n.Settings["ws-opts"])
+	}
+	if wsOpts["path"] != "/ws" {
+		t.Fatalf("expected ws path /ws, got %#v", wsOpts["path"])
+	}
+}
+
+func TestParse_URIList_VLESS_TCPHTTPMapsToHTTPTransport(t *testing.T) {
+	content := []byte("vless://52765b6a-1bba-4291-a3c7-281285df13f1@crazyland.zsh2401.top:32612?type=tcp&encryption=none&path=%2F&headerType=http&security=none#luvjqzgb\n")
+
+	nodes, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+
+	n := nodes[0]
+	if n.Type != TypeVLESS {
+		t.Fatalf("expected type %q, got %q", TypeVLESS, n.Type)
+	}
+	if got := n.Settings["network"]; got != "http" {
+		t.Fatalf("expected network=http, got %#v", got)
+	}
+	httpOpts, ok := n.Settings["http-opts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected http-opts map, got %T", n.Settings["http-opts"])
+	}
+	paths, ok := httpOpts["path"].([]string)
+	if !ok || len(paths) != 1 || paths[0] != "/" {
+		t.Fatalf("expected http path [/], got %#v", httpOpts["path"])
+	}
+	if _, exists := n.Settings["type"]; exists {
+		t.Fatalf("expected raw type query to be normalized away, got %#v", n.Settings)
 	}
 }
 
@@ -255,8 +296,8 @@ func TestParse_URIList_Trojan(t *testing.T) {
 	if n.Server != "trojan.example.com" || n.Port != 443 {
 		t.Fatalf("expected server trojan.example.com:443, got %s:%d", n.Server, n.Port)
 	}
-	if n.Settings["password"] != "passw0rd" || n.Settings["security"] != "tls" {
-		t.Fatalf("expected password/security settings, got %#v", n.Settings)
+	if n.Settings["password"] != "passw0rd" || n.Settings["tls"] != true || n.Settings["servername"] != "example.com" {
+		t.Fatalf("expected password/tls/servername settings, got %#v", n.Settings)
 	}
 }
 

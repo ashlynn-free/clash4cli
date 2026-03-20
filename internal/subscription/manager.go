@@ -44,6 +44,55 @@ func NewManager() *Manager {
 	}
 }
 
+func newCustomSubscription(now time.Time) *Subscription {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return &Subscription{
+		ID:        CustomSubscriptionID,
+		Name:      CustomSubscriptionName,
+		Source:    SourceCustom,
+		Nodes:     []Node{},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+func (m *Manager) ensureCustomSubscriptionLocked() (*Subscription, bool) {
+	sub, ok := m.subscriptions[CustomSubscriptionID]
+	changed := false
+	now := time.Now()
+
+	if !ok || sub == nil {
+		sub = newCustomSubscription(now)
+		m.subscriptions[CustomSubscriptionID] = sub
+		return sub, true
+	}
+
+	if sub.Name != CustomSubscriptionName {
+		sub.Name = CustomSubscriptionName
+		changed = true
+	}
+	if sub.Source != SourceCustom {
+		sub.Source = SourceCustom
+		changed = true
+	}
+	if sub.Nodes == nil {
+		sub.Nodes = []Node{}
+		changed = true
+	}
+	if sub.CreatedAt.IsZero() {
+		sub.CreatedAt = now
+		changed = true
+	}
+	if sub.UpdatedAt.IsZero() {
+		sub.UpdatedAt = now
+		changed = true
+	}
+
+	return sub, changed
+}
+
 // SetUpdateViaProxy controls whether URL subscriptions can be fetched via the currently running local proxy.
 // The actual proxy address is resolved via the proxy provider (if set).
 func (m *Manager) SetUpdateViaProxy(enabled bool) {
@@ -73,6 +122,11 @@ func (m *Manager) Load() error {
 	entries, err := os.ReadDir(subsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if sub, changed := m.ensureCustomSubscriptionLocked(); changed {
+				if err := m.saveSub(sub); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		return err
@@ -100,13 +154,19 @@ func (m *Manager) Load() error {
 		// Backward compatibility: infer source if missing.
 		if sub.Source == "" {
 			if sub.URL != "" {
-				sub.Source = "url"
+				sub.Source = SourceURL
 			} else if sub.Content != "" {
-				sub.Source = "manual"
+				sub.Source = SourceManual
 			}
 		}
 
 		m.subscriptions[sub.ID] = &sub
+	}
+
+	if sub, changed := m.ensureCustomSubscriptionLocked(); changed {
+		if err := m.saveSub(sub); err != nil {
+			loadErrors = append(loadErrors, fmt.Sprintf("failed to save custom subscription: %v", err))
+		}
 	}
 
 	// Log any errors encountered during loading
@@ -163,7 +223,7 @@ func (m *Manager) Add(name, url string) (*Subscription, error) {
 	sub := &Subscription{
 		ID:                  id,
 		Name:                name,
-		Source:              "url",
+		Source:              SourceURL,
 		URL:                 url,
 		Nodes:               nodes,
 		LastUpdateAttemptAt: attemptAt,
@@ -214,7 +274,7 @@ func (m *Manager) AddManual(name, content string) (*Subscription, error) {
 	sub := &Subscription{
 		ID:                  id,
 		Name:                name,
-		Source:              "manual",
+		Source:              SourceManual,
 		Content:             content,
 		Nodes:               nodes,
 		LastUpdateAttemptAt: attemptAt,
@@ -252,9 +312,9 @@ func (m *Manager) Update(id string) error {
 	// Backward compatibility: infer source if missing
 	if source == "" {
 		if url != "" {
-			source = "url"
+			source = SourceURL
 		} else if content != "" {
-			source = "manual"
+			source = SourceManual
 		}
 	}
 
@@ -264,7 +324,9 @@ func (m *Manager) Update(id string) error {
 	var err error
 	viaProxy := false
 	switch source {
-	case "manual":
+	case SourceCustom:
+		return nil
+	case SourceManual:
 		nodes, err = Parse([]byte(content))
 		if err != nil {
 			err = fmt.Errorf("failed to parse subscription content: %w", err)
@@ -274,7 +336,7 @@ func (m *Manager) Update(id string) error {
 			err = fmt.Errorf("no valid nodes found in subscription content")
 			break
 		}
-	case "url":
+	case SourceURL:
 		if url == "" {
 			err = fmt.Errorf("subscription URL is empty")
 			break
@@ -350,6 +412,10 @@ func (m *Manager) UpdateAll() error {
 
 // Delete removes a subscription
 func (m *Manager) Delete(id string) error {
+	if IsCustomSubscriptionID(id) {
+		return fmt.Errorf("custom subscription cannot be deleted")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -521,6 +587,107 @@ func (m *Manager) saveSub(sub *Subscription) error {
 	}
 
 	return os.WriteFile(filepath.Join(subsDir, sub.ID+".yaml"), data, 0644)
+}
+
+func parseCustomNodeInput(raw string) ([]Node, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("custom node URI cannot be empty")
+	}
+	if !looksLikeURIList(raw) {
+		return nil, fmt.Errorf("custom nodes currently only support raw URI links like vless://...")
+	}
+
+	nodes, err := Parse([]byte(raw))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse custom node URI: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("no valid custom nodes found")
+	}
+	return nodes, nil
+}
+
+func sameStoredNode(a, b Node) bool {
+	return a.Name == b.Name && a.Type == b.Type && a.Server == b.Server && a.Port == b.Port
+}
+
+func (m *Manager) AddCustomNodes(raw string) ([]Node, error) {
+	nodes, err := parseCustomNodeInput(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub, _ := m.ensureCustomSubscriptionLocked()
+	sub.Nodes = append(sub.Nodes, nodes...)
+	sub.UpdatedAt = time.Now()
+
+	if err := m.saveSub(sub); err != nil {
+		return nil, err
+	}
+
+	out := make([]Node, len(nodes))
+	copy(out, nodes)
+	return out, nil
+}
+
+func (m *Manager) UpdateCustomNode(target Node, raw string) (*Node, error) {
+	nodes, err := parseCustomNodeInput(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) != 1 {
+		return nil, fmt.Errorf("editing a custom node requires exactly one URI")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub, _ := m.ensureCustomSubscriptionLocked()
+	index := -1
+	for i := range sub.Nodes {
+		if sameStoredNode(sub.Nodes[i], target) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return nil, fmt.Errorf("custom node not found")
+	}
+
+	sub.Nodes[index] = nodes[0]
+	sub.UpdatedAt = time.Now()
+
+	if err := m.saveSub(sub); err != nil {
+		return nil, err
+	}
+
+	updated := sub.Nodes[index]
+	return &updated, nil
+}
+
+func (m *Manager) DeleteCustomNode(target Node) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub, _ := m.ensureCustomSubscriptionLocked()
+	index := -1
+	for i := range sub.Nodes {
+		if sameStoredNode(sub.Nodes[i], target) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return fmt.Errorf("custom node not found")
+	}
+
+	sub.Nodes = append(sub.Nodes[:index], sub.Nodes[index+1:]...)
+	sub.UpdatedAt = time.Now()
+	return m.saveSub(sub)
 }
 
 func randomID(nBytes int) (string, error) {

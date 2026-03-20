@@ -24,6 +24,15 @@ nodes:
   timeout: "Hết thời gian"
   unknown: "Không rõ"
 
+node_detail:
+  title: "Chi tiết nút"
+  server: "Máy chủ"
+  settings: "Cài đặt"
+  website_tests: "Kiểm tra website"
+  testing: "Đang kiểm tra..."
+  not_tested: "Chưa kiểm tra"
+  no_proxy: "Không có slot proxy hoạt động"
+
 subscription:
   name: "Tên"
   url: "URL"

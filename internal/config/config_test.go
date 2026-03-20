@@ -54,6 +54,14 @@ func TestLoad_Save_RoundTrip(t *testing.T) {
 	// Mutate and save.
 	cfg.Language = "zh_cn"
 	cfg.Proxy.MixedPort = 19999
+	cfg.SetSlotUpstream(2, UpstreamProxyConfig{
+		Enabled:  true,
+		Protocol: "https",
+		Server:   "gateway.example.com",
+		Port:     443,
+		Username: "alice",
+		Password: "secret",
+	})
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -69,6 +77,13 @@ func TestLoad_Save_RoundTrip(t *testing.T) {
 	if cfg2.Proxy.MixedPort != 19999 {
 		t.Fatalf("expected MixedPort=19999, got %d", cfg2.Proxy.MixedPort)
 	}
+	upstream, ok := cfg2.GetSlotUpstream(2)
+	if !ok {
+		t.Fatalf("expected slot 2 upstream config to persist")
+	}
+	if !upstream.Enabled || upstream.Protocol != "https" || upstream.Server != "gateway.example.com" || upstream.Port != 443 {
+		t.Fatalf("unexpected upstream config after reload: %#v", upstream)
+	}
 }
 
 func TestGetBaseDir_EnvOverride(t *testing.T) {
@@ -82,5 +97,27 @@ func TestGetBaseDir_EnvOverride(t *testing.T) {
 	want := filepath.Clean(strings.TrimSpace(base))
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestConfig_NormalizeSlots(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Slots = []SlotConfig{
+		{ID: 12, Upstream: UpstreamProxyConfig{Enabled: true, Protocol: "http", Server: "bad", Port: 80}},
+		{ID: 2, Upstream: UpstreamProxyConfig{Enabled: true, Protocol: " https ", Server: " gateway ", Port: 443}},
+		{ID: 2, Upstream: UpstreamProxyConfig{Enabled: true, Protocol: "socks5", Server: "duplicate", Port: 1080}},
+		{ID: 1, Upstream: UpstreamProxyConfig{}},
+	}
+
+	cfg.normalizeSlots()
+
+	if len(cfg.Slots) != 1 {
+		t.Fatalf("expected only one normalized slot entry, got %#v", cfg.Slots)
+	}
+	if cfg.Slots[0].ID != 2 {
+		t.Fatalf("expected slot id 2, got %#v", cfg.Slots[0])
+	}
+	if cfg.Slots[0].Upstream.Protocol != "https" || cfg.Slots[0].Upstream.Server != "gateway" {
+		t.Fatalf("unexpected normalized upstream: %#v", cfg.Slots[0].Upstream)
 	}
 }

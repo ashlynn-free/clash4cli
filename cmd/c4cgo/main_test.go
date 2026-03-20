@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"rocket4cli/internal/proxy"
+)
 
 func TestShouldFallbackToEnv(t *testing.T) {
 	cases := []struct {
@@ -36,5 +40,22 @@ func TestShouldFallbackToEnv(t *testing.T) {
 				t.Fatalf("shouldFallbackToEnv()=%v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestChainSummaries(t *testing.T) {
+	lf := proxy.LockFile{
+		Node:             "Node-A",
+		UpstreamEnabled:  true,
+		UpstreamProtocol: "https",
+		UpstreamServer:   "gateway.example.com",
+		UpstreamPort:     443,
+	}
+
+	if got := listChainSummary(lf); got != "Node-A -> https://gateway.example.com:443" {
+		t.Fatalf("unexpected listChainSummary: %q", got)
+	}
+	if got := verboseChainSummary(lf); got != "chain: Node-A -> https://gateway.example.com:443" {
+		t.Fatalf("unexpected verboseChainSummary: %q", got)
 	}
 }

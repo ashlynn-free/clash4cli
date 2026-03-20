@@ -24,6 +24,15 @@ nodes:
   timeout: "타임아웃"
   unknown: "알 수 없음"
 
+node_detail:
+  title: "노드 상세"
+  server: "서버"
+  settings: "설정"
+  website_tests: "웹사이트 테스트"
+  testing: "테스트 중..."
+  not_tested: "미테스트"
+  no_proxy: "활성 프록시 슬롯 없음"
+
 subscription:
   name: "이름"
   url: "URL"

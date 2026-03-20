@@ -1,0 +1,27 @@
+{
+  "name": "clash4cli",
+  "version": "0.0.0",
+  "description": "CLI proxy tool powered by mihomo — manage subscriptions, switch nodes, and route traffic from your terminal.",
+  "license": "MIT",
+  "bin": {
+    "c4c": "bin/c4c",
+    "c4cgo": "bin/c4cgo"
+  },
+  "optionalDependencies": {
+    "@clash4cli/darwin-arm64": "0.0.0",
+    "@clash4cli/darwin-x64": "0.0.0",
+    "@clash4cli/linux-arm64": "0.0.0",
+    "@clash4cli/linux-x64": "0.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashlynn-free/clash4cli"
+  },
+  "keywords": [
+    "clash",
+    "mihomo",
+    "proxy",
+    "cli",
+    "vpn"
+  ]
+}

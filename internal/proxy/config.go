@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 	"rocket4cli/internal/config"
@@ -53,7 +54,7 @@ type ProxyGroup struct {
 }
 
 // GenerateConfig generates mihomo configuration from nodes
-func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, mixedPort int, apiPort int, apiHost string, redirPort int) (*MihomoConfig, error) {
+func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, slotID int, mixedPort int, apiPort int, apiHost string, redirPort int) (*MihomoConfig, error) {
 	if mixedPort <= 0 {
 		mixedPort = 17890
 		if cfg != nil && cfg.Proxy.MixedPort > 0 {
@@ -104,6 +105,7 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 	}
 
 	proxyNames := make([]string, 0, len(nodes))
+	effectiveProxy := ""
 
 	for _, node := range nodes {
 		proxy := nodeToProxy(node)
@@ -113,20 +115,36 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 		}
 	}
 
+	if selectedNode != nil {
+		effectiveProxy = selectedNode.Name
+	}
+
+	if upstream, ok := cfg.EffectiveUpstreamForSlot(slotID); ok {
+		if selectedNode == nil || strings.TrimSpace(selectedNode.Name) == "" {
+			return nil, fmt.Errorf("slot %d upstream requires a selected node", slotID)
+		}
+		upstreamProxy, upstreamName := buildUpstreamProxy(slotID, *selectedNode, upstream)
+		mihomoConfig.Proxies = append(mihomoConfig.Proxies, upstreamProxy)
+		effectiveProxy = upstreamName
+	}
+
 	// Create proxy groups - GLOBAL will use these
 	if len(proxyNames) > 0 {
 		// Build selector list for "Proxy" group.
 		// For type=select, the first entry is the default. If a node is selected, prefer it.
 		allProxies := make([]string, 0, len(proxyNames)+2)
-		if selectedNode != nil && selectedNode.Name != "" {
-			allProxies = append(allProxies, selectedNode.Name)
+		if effectiveProxy != "" {
+			allProxies = append(allProxies, effectiveProxy)
 		}
 		allProxies = append(allProxies, "DIRECT", "REJECT")
-		for _, name := range proxyNames {
-			if selectedNode != nil && name == selectedNode.Name {
-				continue
+
+		if effectiveProxy == "" || effectiveProxy == selectedNode.Name {
+			for _, name := range proxyNames {
+				if selectedNode != nil && name == selectedNode.Name {
+					continue
+				}
+				allProxies = append(allProxies, name)
 			}
-			allProxies = append(allProxies, name)
 		}
 
 		mihomoConfig.ProxyGroups = []ProxyGroup{
@@ -146,6 +164,45 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 	}
 
 	return mihomoConfig, nil
+}
+
+func slotUpstreamProxyName(slotID int) string {
+	return fmt.Sprintf("slot-%d-upstream", slotID)
+}
+
+func effectiveProxyName(slotID int, selectedNode *subscription.Node, cfg *config.Config) string {
+	if upstream, ok := cfg.EffectiveUpstreamForSlot(slotID); ok && upstream.Enabled {
+		return slotUpstreamProxyName(slotID)
+	}
+	if selectedNode != nil {
+		return selectedNode.Name
+	}
+	return ""
+}
+
+func buildUpstreamProxy(slotID int, selectedNode subscription.Node, upstream config.UpstreamProxyConfig) (map[string]any, string) {
+	name := slotUpstreamProxyName(slotID)
+	proxyType := upstream.Protocol
+	proxy := map[string]any{
+		"name":         name,
+		"type":         proxyType,
+		"server":       upstream.Server,
+		"port":         upstream.Port,
+		"dialer-proxy": selectedNode.Name,
+	}
+
+	if upstream.Protocol == "https" {
+		proxy["type"] = "http"
+		proxy["tls"] = true
+	}
+	if upstream.Username != "" {
+		proxy["username"] = upstream.Username
+	}
+	if upstream.Password != "" {
+		proxy["password"] = upstream.Password
+	}
+
+	return proxy, name
 }
 
 // nodeToProxy converts a Node to mihomo proxy format

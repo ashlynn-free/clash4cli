@@ -492,6 +492,156 @@ func parseVMessURI(uri string) (*Node, error) {
 	return node, nil
 }
 
+func firstQueryValue(values url.Values, keys ...string) string {
+	for _, key := range keys {
+		if got := strings.TrimSpace(values.Get(key)); got != "" {
+			return got
+		}
+	}
+	return ""
+}
+
+func queryBoolValue(values url.Values, keys ...string) bool {
+	raw := strings.ToLower(firstQueryValue(values, keys...))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func splitCSV(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func normalizeURINetwork(values url.Values) string {
+	rawType := strings.ToLower(firstQueryValue(values, "type"))
+	headerType := strings.ToLower(firstQueryValue(values, "headerType", "header_type"))
+
+	switch rawType {
+	case "", "tcp":
+		if headerType == "http" {
+			return "http"
+		}
+		return "tcp"
+	case "h2":
+		return "h2"
+	case "http":
+		return "http"
+	case "grpc":
+		return "grpc"
+	case "ws":
+		return "ws"
+	default:
+		return rawType
+	}
+}
+
+func applyTLSSettings(settings map[string]any, values url.Values) {
+	security := strings.ToLower(firstQueryValue(values, "security"))
+	switch security {
+	case "tls", "reality":
+		settings["tls"] = true
+	}
+
+	if serverName := firstQueryValue(values, "sni", "servername", "serverName"); serverName != "" {
+		settings["servername"] = serverName
+	}
+	if queryBoolValue(values, "allowInsecure", "insecure", "skip-cert-verify") {
+		settings["skip-cert-verify"] = true
+	}
+	if fp := firstQueryValue(values, "fp", "fingerprint", "client-fingerprint", "clientFingerprint"); fp != "" {
+		settings["client-fingerprint"] = fp
+	}
+	if alpn := splitCSV(firstQueryValue(values, "alpn")); len(alpn) > 0 {
+		settings["alpn"] = alpn
+	}
+
+	realityOpts := map[string]any{}
+	if publicKey := firstQueryValue(values, "pbk", "public-key", "publicKey"); publicKey != "" {
+		realityOpts["public-key"] = publicKey
+	}
+	if shortID := firstQueryValue(values, "sid", "short-id", "shortId"); shortID != "" {
+		realityOpts["short-id"] = shortID
+	}
+	if spiderX := firstQueryValue(values, "spx", "spider-x", "spiderX"); spiderX != "" {
+		realityOpts["spider-x"] = spiderX
+	}
+	if len(realityOpts) > 0 {
+		settings["tls"] = true
+		settings["reality-opts"] = realityOpts
+	}
+}
+
+func applyTransportSettings(settings map[string]any, values url.Values) {
+	network := normalizeURINetwork(values)
+	if network == "" || network == "tcp" {
+		return
+	}
+
+	settings["network"] = network
+
+	path := firstQueryValue(values, "path")
+	hostValues := splitCSV(firstQueryValue(values, "host"))
+
+	switch network {
+	case "ws":
+		opts := map[string]any{}
+		if path != "" {
+			opts["path"] = path
+		}
+		if len(hostValues) > 0 {
+			opts["headers"] = map[string]any{"Host": hostValues[0]}
+		}
+		if len(opts) > 0 {
+			settings["ws-opts"] = opts
+		}
+	case "http":
+		opts := map[string]any{}
+		if path != "" {
+			opts["path"] = []string{path}
+		}
+		if len(hostValues) > 0 {
+			headers := map[string]any{"Host": hostValues}
+			opts["headers"] = headers
+		}
+		if len(opts) > 0 {
+			settings["http-opts"] = opts
+		}
+	case "h2":
+		opts := map[string]any{}
+		if len(hostValues) > 0 {
+			opts["host"] = hostValues
+		}
+		if path != "" {
+			opts["path"] = path
+		}
+		if len(opts) > 0 {
+			settings["h2-opts"] = opts
+		}
+	case "grpc":
+		opts := map[string]any{}
+		if serviceName := firstQueryValue(values, "serviceName", "service_name"); serviceName != "" {
+			opts["grpc-service-name"] = serviceName
+		}
+		if len(opts) > 0 {
+			settings["grpc-opts"] = opts
+		}
+	}
+}
+
 func parseVLESSURI(uri string) (*Node, error) {
 	// vless://uuid@host:port?params#name
 	uri = strings.TrimPrefix(uri, "vless://")
@@ -524,12 +674,18 @@ func parseVLESSURI(uri string) (*Node, error) {
 		},
 	}
 
-	// Parse query params
-	for key, values := range parsed.Query() {
-		if len(values) > 0 {
-			node.Settings[key] = values[0]
-		}
+	values := parsed.Query()
+	if encryption := firstQueryValue(values, "encryption"); encryption != "" {
+		node.Settings["encryption"] = encryption
 	}
+	if flow := firstQueryValue(values, "flow"); flow != "" {
+		node.Settings["flow"] = flow
+	}
+	if packetEncoding := firstQueryValue(values, "packetEncoding", "packet-encoding"); packetEncoding != "" {
+		node.Settings["packet-encoding"] = packetEncoding
+	}
+	applyTLSSettings(node.Settings, values)
+	applyTransportSettings(node.Settings, values)
 
 	if node.Name == "" {
 		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
@@ -568,11 +724,9 @@ func parseTrojanURI(uri string) (*Node, error) {
 		},
 	}
 
-	for key, values := range parsed.Query() {
-		if len(values) > 0 {
-			node.Settings[key] = values[0]
-		}
-	}
+	values := parsed.Query()
+	applyTLSSettings(node.Settings, values)
+	applyTransportSettings(node.Settings, values)
 
 	if node.Name == "" {
 		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)

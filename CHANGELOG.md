@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## v0.7.0 - 2026-03-20
+
+### Added
+- Node detail view: press a key on any node to see full info and run per-site reachability tests (latency to Google, YouTube, GitHub, etc.).
+- Per-slot upstream proxy chaining: configure an HTTP/HTTPS/SOCKS5 upstream proxy for each slot in Settings, enabling traffic to flow through two proxies in series.
+- System Info page in Settings showing core version, uptime, rules count, OS info, and app version.
+- Temporary core probing: test site reachability for nodes that are not bound to a running slot.
+- npm distribution scaffolding (`@clash4cli/*` platform packages and `clash4cli` wrapper) with assemble/publish scripts.
+- i18n: node detail view strings added for all 14 supported languages.
+
+### Changed
+- c4cgo slot listing and verbose output now display the full proxy chain when upstream is enabled (e.g. `node -> socks5://host:port`).
+- Speed test latency probing is now slot-aware; uses the correct API endpoint and effective proxy name per slot.
+- Settings tab accepts a SlotManager reference for per-slot upstream configuration and supports restarting individual or all slots.
+- Proxy config generation now receives a slot ID to resolve per-slot upstream settings.
+- Global keys (q, tab, digit shortcuts) are suppressed while the node detail view is open.
+
 ## v0.6.0 - 2026-03-08
 
 ### Changed

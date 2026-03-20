@@ -151,4 +151,32 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 
 	// Stop "alive" detection for cleanup.
 	reachable = false
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestModel_PrefersNonCustomSubscriptionByDefault(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+
+	subMgr := subscription.NewManager()
+	if err := subMgr.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sub, err := subMgr.AddManual("sub", "ss://YWVzLTEyOC1nY206cGFzcw==@example.com:8388#TestNode\n")
+	if err != nil {
+		t.Fatalf("AddManual: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	nodeMgr := node.NewManager(subMgr, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
+	slotMgr := proxy.NewSlotManager(cfg)
+	m := New(cfg, subMgr, nodeMgr, slotMgr, "dev", "")
+
+	subs := subMgr.List()
+	sortSubscriptionsByNameAndID(subs)
+
+	model, _ := m.Update(tabs.SubsRefreshedMsg{Subs: subs})
+	got := model.(*Model)
+	if got.activeSubID != sub.ID {
+		t.Fatalf("expected default active subscription to prefer real sub %q, got %q", sub.ID, got.activeSubID)
+	}
 }

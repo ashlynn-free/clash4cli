@@ -24,6 +24,15 @@ nodes:
   timeout: "Timeout"
   unknown: "Sconosciuto"
 
+node_detail:
+  title: "Dettaglio nodo"
+  server: "Server"
+  settings: "Impostazioni"
+  website_tests: "Test siti web"
+  testing: "Test in corso..."
+  not_tested: "Non testato"
+  no_proxy: "Nessuno slot proxy attivo"
+
 subscription:
   name: "Nome"
   url: "URL"

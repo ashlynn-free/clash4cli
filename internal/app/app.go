@@ -79,14 +79,39 @@ func New(version string) (*App, error) {
 
 	nodeMgr := node.NewManager(subManager, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
 	slotMgr := proxy.NewSlotManager(cfg)
+	nodeMgr.SetProbeLockProvider(func(node *subscription.Node) *proxy.LockFile {
+		if node == nil || slotMgr == nil {
+			return nil
+		}
+		slotID, ok := slotMgr.NodeSlot(node.Name)
+		if !ok {
+			return nil
+		}
+		mlf, err := proxy.ReadMultiLockFile()
+		if err != nil || mlf == nil {
+			return nil
+		}
+		lock, ok := mlf.Instances[slotID]
+		if !ok {
+			return nil
+		}
+		lockCopy := lock
+		return &lockCopy
+	})
 	subManager.SetUpdateViaProxy(cfg.Subscription.UpdateViaProxy)
 	subManager.SetProxyProvider(func() (*url.URL, error) {
-		// Use slot 0 (or first active slot) for subscription updates via proxy.
+		// Use slot 0 (or first active slot) for subscription updates via proxy,
+		// but never borrow a slot that is already chained to an upstream proxy.
 		state := slotMgr.GetSlotState(0)
+		if state != nil && state.UpstreamEnabled {
+			state = nil
+		}
 		if state == nil {
-			slots := slotMgr.ActiveSlots()
-			if len(slots) > 0 {
-				state = slots[0]
+			for _, candidate := range slotMgr.ActiveSlots() {
+				if candidate != nil && !candidate.UpstreamEnabled {
+					state = candidate
+					break
+				}
 			}
 		}
 		if state == nil || state.Port <= 0 || state.Port >= 65536 {
