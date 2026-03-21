@@ -44,9 +44,9 @@ type NodesTab struct {
 	subscriptionID string
 	// Per-subscription scroll positions
 	scrollStates map[string]scrollState
-	// Multi-slot indicators: node name → indicator
+	// Slot 0 indicator: node name → indicator
 	slotIndicators map[string]SlotIndicator
-	// Per-node traffic info for active slots: node name → formatted string
+	// Slot 0 traffic info: node name → formatted string
 	slotTraffic     map[string]string
 	serverDisplay   string // show|blur|off
 	preselectName   string
@@ -164,7 +164,6 @@ func (t *NodesTab) View() string {
 	// Help
 	help := styles.HelpKey.Render("↑/↓") + styles.HelpText.Render(" navigate  ") +
 		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" slot0  ") +
-		styles.HelpKey.Render("0-9") + styles.HelpText.Render(" slots  ") +
 		styles.HelpKey.Render("D") + styles.HelpText.Render(" disconnect all  ") +
 		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
 		styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh  ") +
@@ -345,7 +344,7 @@ func (t *NodesTab) updateTableRows() {
 			}
 		}
 
-		// For active slots, show traffic in Status column
+		// For slot 0, show traffic in Status column
 		if traffic, ok := t.slotTraffic[n.Name]; ok && traffic != "" {
 			status = traffic
 		}

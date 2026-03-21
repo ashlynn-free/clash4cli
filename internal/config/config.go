@@ -49,11 +49,28 @@ type UpstreamProxyEntry struct {
 	Password string `yaml:"password,omitempty"`
 }
 
+// SlotNodeRef stores the persisted proxy node selection for a slot.
+type SlotNodeRef struct {
+	SubID      string
+	NodeName   string
+	NodeServer string
+	NodePort   int
+	NodeType   string
+}
+
 // SlotConfig stores per-slot persisted settings.
 type SlotConfig struct {
-	ID         int                 `yaml:"id"`
-	UpstreamID string              `yaml:"upstream_id,omitempty"`
-	Upstream   UpstreamProxyConfig `yaml:"upstream,omitempty"` // legacy; migrated to UpstreamID
+	ID              int                 `yaml:"id"`
+	SubID           string              `yaml:"sub_id,omitempty"`
+	NodeName        string              `yaml:"node_name,omitempty"`
+	NodeServer      string              `yaml:"node_server,omitempty"`
+	NodePort        int                 `yaml:"node_port,omitempty"`
+	NodeType        string              `yaml:"node_type,omitempty"`
+	StartMode       string              `yaml:"start_mode,omitempty"`
+	PortMode        string              `yaml:"port_mode,omitempty"`
+	ManualMixedPort int                 `yaml:"manual_mixed_port,omitempty"`
+	UpstreamID      string              `yaml:"upstream_id,omitempty"`
+	Upstream        UpstreamProxyConfig `yaml:"upstream,omitempty"` // legacy; migrated to UpstreamID
 }
 
 // UpstreamProxyConfig describes an optional upstream HTTP/HTTPS/SOCKS5 proxy.
@@ -146,6 +163,9 @@ func Load() (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	if cfg.Proxy.MixedPort > 0 {
+		cfg.Proxy.BaseMixedPort = cfg.Proxy.MixedPort
+	}
 	cfg.migrateInlineUpstreams()
 	cfg.normalizeSlots()
 
@@ -164,6 +184,9 @@ func (c *Config) Save() error {
 	}
 
 	configPath := filepath.Join(configDir, "config.yaml")
+	if c.Proxy.MixedPort > 0 {
+		c.Proxy.BaseMixedPort = c.Proxy.MixedPort
+	}
 	c.normalizeSlots()
 	data, err := yaml.Marshal(c)
 	if err != nil {

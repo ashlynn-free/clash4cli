@@ -6,6 +6,7 @@ app:
 
 tabs:
   nodes: "节点"
+  slots: "槽位"
   subscription: "订阅"
   settings: "设置"
   logs: "日志"
@@ -69,6 +70,34 @@ settings:
   off: "关"
   save: "保存"
   saved: "设置已保存！"
+
+slots:
+  title: "槽位"
+  no_proxy: "未设置"
+  no_upstream: "直连"
+  power: "开关"
+  mode: "模式"
+  proxy: "代理"
+  port: "端口"
+  upstream: "上游"
+  auto_port: "自动分配"
+  manual_port: "手动指定"
+  manual_port_prompt: "输入手动 mixed port："
+  select_proxy: "选择代理"
+  select_mode: "选择模式"
+  select_port: "选择端口"
+  select_upstream: "选择上游"
+  ready: "可启动"
+  running: "运行中"
+  missing_proxy: "缺少代理"
+  invalid_port: "端口无效"
+  started: "Slot %d 已启动。"
+  stopped: "Slot %d 已停止。"
+  restarted: "Slot %d 已重启。"
+  saved: "Slot %d 已保存。"
+  restarting: "Slot %d 已保存，正在重启..."
+  proxy_picker_hint: "使用 ←/→ 切换订阅，回车选择节点。"
+  upstream_picker_hint: "选择一个上游代理，或保持为空。"
 
 logs:
   clear: "清空"

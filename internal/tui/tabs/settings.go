@@ -265,7 +265,7 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 		linuxSection = "Linux Exclusive Features"
 	}
 	fields = append(fields, settingField{
-		label:     "Upstream & Slots",
+		label:     "Upstream Proxies",
 		fieldType: FieldTypeHeader,
 	})
 
@@ -274,13 +274,6 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 		helpText:  "Manage reusable upstream proxy definitions.",
 		fieldType: FieldTypeButton,
 		key:       "edit_upstream_proxies",
-	})
-
-	fields = append(fields, settingField{
-		label:     "Edit Slots >",
-		helpText:  "Open the slot list and configure per-slot settings.",
-		fieldType: FieldTypeButton,
-		key:       "edit_slots",
 	})
 
 	fields = append(fields, settingField{
@@ -2129,6 +2122,7 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 					return SettingsErrorMsg{Error: fmt.Errorf("invalid mixed port: %q", field.input.Value())}
 				}
 				t.cfg.Proxy.MixedPort = port
+				t.cfg.Proxy.BaseMixedPort = port
 			case "allow_lan":
 				v := field.options[field.selectedIdx].value
 				switch v {

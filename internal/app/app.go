@@ -83,20 +83,23 @@ func New(version string) (*App, error) {
 		if node == nil || slotMgr == nil {
 			return nil
 		}
-		slotID, ok := slotMgr.NodeSlot(node.Name)
-		if !ok {
+		slotIDs := slotMgr.NodeSlots(node.Name)
+		if len(slotIDs) == 0 {
 			return nil
 		}
 		mlf, err := proxy.ReadMultiLockFile()
 		if err != nil || mlf == nil {
 			return nil
 		}
-		lock, ok := mlf.Instances[slotID]
-		if !ok {
-			return nil
+		for _, slotID := range slotIDs {
+			lock, ok := mlf.Instances[slotID]
+			if !ok {
+				continue
+			}
+			lockCopy := lock
+			return &lockCopy
 		}
-		lockCopy := lock
-		return &lockCopy
+		return nil
 	})
 	subManager.SetUpdateViaProxy(cfg.Subscription.UpdateViaProxy)
 	subManager.SetProxyProvider(func() (*url.URL, error) {

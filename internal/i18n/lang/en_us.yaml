@@ -6,6 +6,7 @@ app:
 
 tabs:
   nodes: "Nodes"
+  slots: "Slots"
   subscription: "Subscriptions"
   settings: "Settings"
   logs: "Logs"
@@ -69,6 +70,34 @@ settings:
   off: "Off"
   save: "Save"
   saved: "Settings saved!"
+
+slots:
+  title: "Slots"
+  no_proxy: "Not set"
+  no_upstream: "Direct"
+  power: "Power"
+  mode: "Mode"
+  proxy: "Proxy"
+  port: "Port"
+  upstream: "Upstream"
+  auto_port: "Auto allocate"
+  manual_port: "Manual"
+  manual_port_prompt: "Enter manual mixed port:"
+  select_proxy: "Select Proxy"
+  select_mode: "Select Mode"
+  select_port: "Select Port"
+  select_upstream: "Select Upstream"
+  ready: "Ready"
+  running: "Running"
+  missing_proxy: "Missing proxy"
+  invalid_port: "Invalid port"
+  started: "Slot %d started."
+  stopped: "Slot %d stopped."
+  restarted: "Slot %d restarted."
+  saved: "Slot %d saved."
+  restarting: "Slot %d saved. Restarting..."
+  proxy_picker_hint: "Use ←/→ to switch subscriptions, Enter to select a node."
+  upstream_picker_hint: "Choose an upstream proxy or None."
 
 logs:
   clear: "Clear"

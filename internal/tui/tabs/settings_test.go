@@ -39,13 +39,7 @@ func TestSettingsTab_FocusSkipsHeaderAndDisabledFields(t *testing.T) {
 		t.Fatalf("expected to focus edit_upstream_proxies, got %q", tab.fields[tab.focusedField].key)
 	}
 
-	// edit_upstream_proxies -> edit_slots
-	tab.focusNext()
-	if tab.fields[tab.focusedField].key != "edit_slots" {
-		t.Fatalf("expected to focus edit_slots, got %q", tab.fields[tab.focusedField].key)
-	}
-
-	// edit_slots -> (skip linux header and disabled linux-only fields if needed)
+	// edit_upstream_proxies -> (skip linux header and disabled linux-only fields if needed)
 	tab.focusNext()
 	if runtime.GOOS == "linux" {
 		if tab.fields[tab.focusedField].key != "tun_enabled" {
@@ -85,47 +79,6 @@ func TestSettingsTab_LoadSlotUpstreamDraft(t *testing.T) {
 	selectedValue := field.options[field.selectedIdx].value
 	if selectedValue != id {
 		t.Fatalf("expected selected upstream ID=%q, got %q", id, selectedValue)
-	}
-}
-
-func TestSettingsTab_EditSlotsNavigation(t *testing.T) {
-	cfg := config.DefaultConfig()
-	tab := NewSettingsTab(cfg, nil, "dev")
-	tab.focusedField = fieldIndexByKey(tab.fields, "edit_slots")
-
-	var cmd tea.Cmd
-	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	_ = cmd
-
-	if !tab.showSlotList || tab.showSlotDetail {
-		t.Fatalf("expected slot list to open, showSlotList=%v showSlotDetail=%v", tab.showSlotList, tab.showSlotDetail)
-	}
-
-	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_ = cmd
-	if tab.slotListIndex != 1 {
-		t.Fatalf("expected slotListIndex=1, got %d", tab.slotListIndex)
-	}
-
-	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	_ = cmd
-	if !tab.showSlotList || !tab.showSlotDetail {
-		t.Fatalf("expected slot detail to open on top of slot list, showSlotList=%v showSlotDetail=%v", tab.showSlotList, tab.showSlotDetail)
-	}
-	if tab.slotUpstreamSlot != 1 {
-		t.Fatalf("expected slotUpstreamSlot=1, got %d", tab.slotUpstreamSlot)
-	}
-
-	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	_ = cmd
-	if !tab.showSlotList || tab.showSlotDetail {
-		t.Fatalf("expected esc to return to slot list, showSlotList=%v showSlotDetail=%v", tab.showSlotList, tab.showSlotDetail)
-	}
-
-	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	_ = cmd
-	if tab.showSlotList || tab.showSlotDetail {
-		t.Fatalf("expected esc to return to main settings, showSlotList=%v showSlotDetail=%v", tab.showSlotList, tab.showSlotDetail)
 	}
 }
 

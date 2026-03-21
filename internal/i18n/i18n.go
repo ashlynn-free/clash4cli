@@ -19,6 +19,7 @@ type Messages struct {
 	NodeDetail   NodeDetailMessages   `yaml:"node_detail"`
 	Subscription SubscriptionMessages `yaml:"subscription"`
 	Settings     SettingsMessages     `yaml:"settings"`
+	Slots        SlotsMessages        `yaml:"slots"`
 	Logs         LogMessages          `yaml:"logs"`
 	Status       StatusMessages       `yaml:"status"`
 	Actions      ActionMessages       `yaml:"actions"`
@@ -34,6 +35,7 @@ type AppMessages struct {
 
 type TabMessages struct {
 	Nodes        string `yaml:"nodes"`
+	Slots        string `yaml:"slots"`
 	Subscription string `yaml:"subscription"`
 	Settings     string `yaml:"settings"`
 	Logs         string `yaml:"logs"`
@@ -101,6 +103,35 @@ type SettingsMessages struct {
 	Off            string `yaml:"off"`
 	Save           string `yaml:"save"`
 	Saved          string `yaml:"saved"`
+}
+
+type SlotsMessages struct {
+	Title              string `yaml:"title"`
+	NoProxy            string `yaml:"no_proxy"`
+	NoUpstream         string `yaml:"no_upstream"`
+	Power              string `yaml:"power"`
+	Mode               string `yaml:"mode"`
+	Proxy              string `yaml:"proxy"`
+	Port               string `yaml:"port"`
+	Upstream           string `yaml:"upstream"`
+	AutoPort           string `yaml:"auto_port"`
+	ManualPort         string `yaml:"manual_port"`
+	ManualPortPrompt   string `yaml:"manual_port_prompt"`
+	SelectProxy        string `yaml:"select_proxy"`
+	SelectMode         string `yaml:"select_mode"`
+	SelectPort         string `yaml:"select_port"`
+	SelectUpstream     string `yaml:"select_upstream"`
+	Ready              string `yaml:"ready"`
+	Running            string `yaml:"running"`
+	MissingProxy       string `yaml:"missing_proxy"`
+	InvalidPort        string `yaml:"invalid_port"`
+	Started            string `yaml:"started"`
+	Stopped            string `yaml:"stopped"`
+	Restarted          string `yaml:"restarted"`
+	Saved              string `yaml:"saved"`
+	Restarting         string `yaml:"restarting"`
+	ProxyPickerHint    string `yaml:"proxy_picker_hint"`
+	UpstreamPickerHint string `yaml:"upstream_picker_hint"`
 }
 
 type LogMessages struct {

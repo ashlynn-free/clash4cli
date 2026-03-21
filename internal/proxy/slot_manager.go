@@ -36,7 +36,6 @@ type SlotManager struct {
 	slotModes  [MaxSlots]string // "rule", "global", "" (stopped)
 	slotNodes  [MaxSlots]string // node name per slot
 	slotSubIDs [MaxSlots]string // subscription ID per slot
-	nodeToSlot map[string]int   // node name → slot index
 	logCh      chan LogEntry
 	// Callback to save slot history to config
 	saveHistoryFunc func(h []config.SlotHistoryEntry)
@@ -47,9 +46,8 @@ type SlotManager struct {
 // NewSlotManager creates a new SlotManager.
 func NewSlotManager(cfg *config.Config) *SlotManager {
 	sm := &SlotManager{
-		cfg:        cfg,
-		nodeToSlot: make(map[string]int),
-		logCh:      make(chan LogEntry, 100),
+		cfg:   cfg,
+		logCh: make(chan LogEntry, 100),
 	}
 	return sm
 }
@@ -88,11 +86,6 @@ func (sm *SlotManager) StartSlotWithMode(slotID int, subID string, nodes []subsc
 		return fmt.Errorf("slot %d is already running", slotID)
 	}
 
-	// Check node exclusivity
-	if existingSlot, ok := sm.nodeToSlot[selected.Name]; ok && existingSlot != slotID {
-		return fmt.Errorf("node %q already bound to slot %d", selected.Name, existingSlot)
-	}
-
 	// Collect forbidden ports from other running slots
 	forbidden := sm.collectForbiddenPortsLocked()
 
@@ -110,7 +103,6 @@ func (sm *SlotManager) StartSlotWithMode(slotID int, subID string, nodes []subsc
 	sm.slotModes[slotID] = initialMode
 	sm.slotNodes[slotID] = selected.Name
 	sm.slotSubIDs[slotID] = subID
-	sm.nodeToSlot[selected.Name] = slotID
 
 	// Update lock file
 	sm.writeLockFileLocked()
@@ -244,12 +236,36 @@ func (sm *SlotManager) GetSlotState(slotID int) *SlotState {
 	}
 }
 
-// NodeSlot returns the slot ID for a node, and whether it's bound.
-func (sm *SlotManager) NodeSlot(nodeName string) (int, bool) {
+// NodeSlots returns all running slot IDs currently using the given node name.
+func (sm *SlotManager) NodeSlots(nodeName string) []int {
+	if nodeName == "" {
+		return nil
+	}
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	id, ok := sm.nodeToSlot[nodeName]
-	return id, ok
+
+	ids := make([]int, 0, MaxSlots)
+	for i := 0; i < MaxSlots; i++ {
+		if sm.slotNodes[i] != nodeName {
+			continue
+		}
+		if sc := sm.slots[i]; sc != nil && sc.GetStatus() == StatusRunning {
+			ids = append(ids, i)
+		}
+	}
+	return ids
+}
+
+// NodeSlot returns the first running slot ID for a node, and whether it's bound.
+// Multiple slots may legitimately use the same node; callers that need the full
+// set should use NodeSlots.
+func (sm *SlotManager) NodeSlot(nodeName string) (int, bool) {
+	ids := sm.NodeSlots(nodeName)
+	if len(ids) == 0 {
+		return 0, false
+	}
+	return ids[0], true
 }
 
 // GetTrafficForSlot returns traffic totals for a slot.
@@ -435,9 +451,6 @@ func (sm *SlotManager) SyncFromLockFile() {
 		sm.slotModes[slotID] = restoredMode
 		sm.slotNodes[slotID] = lock.Node
 		sm.slotSubIDs[slotID] = lock.SubID
-		if lock.Node != "" {
-			sm.nodeToSlot[lock.Node] = slotID
-		}
 		// Update history with restored running slot
 		sm.slotHistory[slotID] = &config.SlotHistoryEntry{
 			SlotID:   slotID,
@@ -471,8 +484,13 @@ func (sm *SlotManager) Slot0Port() int {
 	if sc := sm.slots[0]; sc != nil && sc.GetStatus() == StatusRunning {
 		return sc.CurrentPort()
 	}
-	if sm.cfg != nil && sm.cfg.Proxy.MixedPort > 0 {
-		return sm.cfg.Proxy.MixedPort
+	if sm.cfg != nil {
+		if port, _, ok := sm.cfg.SlotMixedPort(0); ok {
+			return port
+		}
+		if sm.cfg.Proxy.MixedPort > 0 {
+			return sm.cfg.Proxy.MixedPort
+		}
 	}
 	return 0
 }
@@ -482,12 +500,6 @@ func (sm *SlotManager) Slot0Port() int {
 func (sm *SlotManager) cleanSlotLocked(slotID int) {
 	if slotID < 0 || slotID >= MaxSlots {
 		return
-	}
-	nodeName := sm.slotNodes[slotID]
-	if nodeName != "" {
-		if existing, ok := sm.nodeToSlot[nodeName]; ok && existing == slotID {
-			delete(sm.nodeToSlot, nodeName)
-		}
 	}
 	sm.slots[slotID] = nil
 	sm.slotModes[slotID] = ""

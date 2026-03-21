@@ -221,6 +221,14 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	}
 
 	mixedPort := baseMixed + slotID
+	if c.cfg != nil {
+		resolvedPort, _, ok := c.cfg.SlotMixedPort(slotID)
+		if !ok {
+			c.status = StatusError
+			return fmt.Errorf("slot %d has an invalid manual mixed-port", slotID)
+		}
+		mixedPort = resolvedPort
+	}
 	if _, blocked := forbidden[mixedPort]; blocked {
 		c.status = StatusError
 		return fmt.Errorf("mixed-port %d (slot %d) is already used by another slot", mixedPort, slotID)
