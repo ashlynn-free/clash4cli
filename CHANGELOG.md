@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## v0.8.3 - 2026-03-21
+
+### Added
+- Node detail view now shows IP info (IP address, location, organization) from ipinfo.io when testing, helping verify the actual exit IP of a proxy node.
+- IP info query reuses the same temporary core as site latency tests to avoid extra startup overhead for unbound nodes.
+- Nodes panel Status column now shows the upstream proxy label when a slot has an upstream proxy configured (e.g. `:7890 ↑1.2K ↓3.4M VPN`).
+- Custom subscription tabs now display a 📌 pin emoji prefix for easier identification.
+- i18n: IP info strings added for all 14 supported languages.
+
+### Fixed
+- Nodes table: when the Server column is hidden, Latency and Status columns now move forward instead of leaving a huge gap after Name.
+
+## v0.8.2 - 2026-03-21
+
+### Added
+- Nodes tab now remembers scroll position independently per subscription; switching subscriptions no longer resets or shares cursor position.
+- Wrap-around scrolling in Nodes table: scrolling past the top jumps to the bottom and vice versa.
+
+## v0.8.1 - 2026-03-21
+
+### Changed
+- Nodes slot key behavior is now: first press starts the slot in `Global`, a second press within a short double-press window starts it in `Rule`, and any press on a running slot stops it immediately.
+- Global startup now enters `global` directly from the generated mihomo config instead of starting in `rule` and switching via the API afterward.
+- Slot restarts now preserve the slot's previous mode (`rule` or `global`) instead of always falling back to `rule`.
+
+### Fixed
+- Settings text inputs now keep `Left`/`Right`, `Backspace`, and in-input editing behavior instead of letting page-level navigation consume those keys.
+- Fixed a regression where slot start shortcuts could fail to land in `Global` because the post-start mode switch ran before the mihomo API was ready.
+
+## v0.8.0 - 2026-03-21
+
+### Added
+- Reserved local subscription `Cus`: always present as a built-in custom node bucket, participates in the same Nodes/slots flow as normal subscriptions.
+- Subscriptions tab custom-node manager for `Cus`: select `Cus` and press `E` to enter a CRUD view, then add/edit/delete nodes using raw URI links such as `vless://...`.
+
+### Changed
+- Custom node editing is now scoped to the Subscriptions tab instead of the Nodes tab, keeping node connection and node management separate.
+- VLESS/Trojan URI normalization now maps transport/TLS-related query parameters into mihomo-compatible fields; `type=tcp&headerType=http` style VLESS links now convert to usable HTTP transport config instead of corrupting the proxy type.
+
 ## v0.7.0 - 2026-03-20
 
 ### Added

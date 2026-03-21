@@ -89,38 +89,42 @@ type LogEntry struct {
 
 // Controller controls the mihomo process
 type Controller struct {
-	cmd              *exec.Cmd
-	status           Status
-	mu               sync.RWMutex
-	logCh            chan LogEntry
-	apiClient        *http.Client
-	cfg              *config.Config
-	configPath       string
-	pid              int
-	port             int
-	apiPort          int
-	redirPort        int
-	apiHost          string
-	proxyHost        string
-	secret           string
-	logPath          string
-	attached         bool // true if restored from lockfile (not started by this process)
-	effectiveProxy   string
-	upstreamEnabled  bool
-	upstreamProtocol string
-	upstreamServer   string
-	upstreamPort     int
+	cmd               *exec.Cmd
+	status            Status
+	mu                sync.RWMutex
+	logCh             chan LogEntry
+	apiClient         *http.Client
+	cfg               *config.Config
+	configPath        string
+	pid               int
+	port              int
+	apiPort           int
+	redirPort         int
+	apiHost           string
+	proxyHost         string
+	secret            string
+	logPath           string
+	lockSlotID        int
+	multiInstanceLock bool
+	attached          bool // true if restored from lockfile (not started by this process)
+	effectiveProxy    string
+	upstreamEnabled   bool
+	upstreamProtocol  string
+	upstreamServer    string
+	upstreamPort      int
 }
 
 // NewController creates a new proxy controller
 func NewController(cfg *config.Config) *Controller {
 	c := &Controller{
-		status:    StatusStopped,
-		logCh:     make(chan LogEntry, 100),
-		apiClient: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
-		cfg:       cfg,
-		apiHost:   "127.0.0.1",
-		proxyHost: "127.0.0.1",
+		status:            StatusStopped,
+		logCh:             make(chan LogEntry, 100),
+		apiClient:         &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
+		cfg:               cfg,
+		apiHost:           "127.0.0.1",
+		proxyHost:         "127.0.0.1",
+		lockSlotID:        0,
+		multiInstanceLock: false,
 	}
 	c.syncFromLockFile()
 	return c
@@ -448,7 +452,7 @@ func (c *Controller) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	lock, err := ReadLockFile()
+	lock, err := c.readLockFile()
 	if err != nil || lock == nil {
 		c.status = StatusStopped
 		c.cmd = nil
@@ -972,8 +976,19 @@ func (c *Controller) GetRulesCount() (int, error) {
 	return len(out.Rules), nil
 }
 
-// removeLockFile removes the proxy.lock file
+func (c *Controller) readLockFile() (*LockFile, error) {
+	if c != nil && c.multiInstanceLock {
+		return readSlotLockFile(c.lockSlotID)
+	}
+	return ReadLockFile()
+}
+
+// removeLockFile removes the controller's lock entry.
 func (c *Controller) removeLockFile() {
+	if c != nil && c.multiInstanceLock {
+		_ = removeSlotLockFile(c.lockSlotID)
+		return
+	}
 	lockPath, err := config.GetLockFilePath()
 	if err != nil {
 		return

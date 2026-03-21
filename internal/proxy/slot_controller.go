@@ -23,12 +23,14 @@ type SlotController struct {
 // NewSlotController creates a SlotController for the given slot.
 func NewSlotController(slotID int, cfg *config.Config) *SlotController {
 	c := &Controller{
-		status:    StatusStopped,
-		logCh:     make(chan LogEntry, 100),
-		apiClient: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
-		cfg:       cfg,
-		apiHost:   "127.0.0.1",
-		proxyHost: "127.0.0.1",
+		status:            StatusStopped,
+		logCh:             make(chan LogEntry, 100),
+		apiClient:         &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
+		cfg:               cfg,
+		apiHost:           "127.0.0.1",
+		proxyHost:         "127.0.0.1",
+		lockSlotID:        slotID,
+		multiInstanceLock: true,
 	}
 	return &SlotController{
 		slotID: slotID,
@@ -44,7 +46,12 @@ func (sc *SlotController) SlotID() int {
 // Start starts the proxy instance for this slot.
 // forbidden is a set of ports already used by other slots.
 func (sc *SlotController) Start(subID string, nodes []subscription.Node, selectedNode *subscription.Node, forbidden map[int]struct{}) error {
-	return sc.ctrl.StartSlot(sc.slotID, subID, nodes, selectedNode, forbidden)
+	return sc.StartWithMode(subID, nodes, selectedNode, forbidden, "rule")
+}
+
+// StartWithMode starts the proxy instance with an explicit initial mode.
+func (sc *SlotController) StartWithMode(subID string, nodes []subscription.Node, selectedNode *subscription.Node, forbidden map[int]struct{}, mode string) error {
+	return sc.ctrl.StartSlotWithMode(sc.slotID, subID, nodes, selectedNode, forbidden, mode)
 }
 
 // Stop stops this slot's mihomo process.
@@ -160,6 +167,11 @@ func slotLogPath(slotID int) (string, error) {
 
 // StartSlot is an extended Start that uses per-slot paths and port offsets.
 func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.Node, selectedNode *subscription.Node, forbidden map[int]struct{}) error {
+	return c.StartSlotWithMode(slotID, subID, nodes, selectedNode, forbidden, "rule")
+}
+
+// StartSlotWithMode is an extended Start that uses per-slot paths, port offsets, and an explicit initial mode.
+func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscription.Node, selectedNode *subscription.Node, forbidden map[int]struct{}, mode string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -251,7 +263,7 @@ func (c *Controller) StartSlot(slotID int, subID string, nodes []subscription.No
 	c.setChainRuntimeLocked(slotID, selectedNode)
 
 	// Generate mihomo config
-	mihomoConfig, err := GenerateConfig(nodes, selectedNode, c.cfg, slotID, c.port, c.apiPort, apiHost, 0)
+	mihomoConfig, err := GenerateConfigWithMode(nodes, selectedNode, c.cfg, slotID, c.port, c.apiPort, apiHost, 0, mode)
 	if err != nil {
 		c.status = StatusError
 		return fmt.Errorf("failed to generate config: %w", err)

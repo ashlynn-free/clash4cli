@@ -55,6 +55,40 @@ type ProxyGroup struct {
 
 // GenerateConfig generates mihomo configuration from nodes
 func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, slotID int, mixedPort int, apiPort int, apiHost string, redirPort int) (*MihomoConfig, error) {
+	return GenerateConfigWithMode(nodes, selectedNode, cfg, slotID, mixedPort, apiPort, apiHost, redirPort, "rule")
+}
+
+func normalizeProxyMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "global":
+		return "global"
+	case "direct":
+		return "direct"
+	default:
+		return "rule"
+	}
+}
+
+func appendUnique(values []string, items ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, item := range items {
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		values = append(values, item)
+		seen[item] = struct{}{}
+	}
+	return values
+}
+
+// GenerateConfigWithMode generates mihomo configuration from nodes with an explicit initial mode.
+func GenerateConfigWithMode(nodes []subscription.Node, selectedNode *subscription.Node, cfg *config.Config, slotID int, mixedPort int, apiPort int, apiHost string, redirPort int, mode string) (*MihomoConfig, error) {
 	if mixedPort <= 0 {
 		mixedPort = 17890
 		if cfg != nil && cfg.Proxy.MixedPort > 0 {
@@ -86,7 +120,7 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 		RedirPort:          redirPort,
 		AllowLan:           allowLan,
 		BindAddress:        bindAddress,
-		Mode:               "rule", // Drive all traffic via our "Proxy" selector group
+		Mode:               normalizeProxyMode(mode),
 		LogLevel:           "info",
 		ExternalController: fmt.Sprintf("%s:%d", apiHost, apiPort),
 		Proxies:            make([]map[string]any, 0, len(nodes)),
@@ -133,18 +167,21 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 		// Build selector list for "Proxy" group.
 		// For type=select, the first entry is the default. If a node is selected, prefer it.
 		allProxies := make([]string, 0, len(proxyNames)+2)
-		if effectiveProxy != "" {
-			allProxies = append(allProxies, effectiveProxy)
-		}
-		allProxies = append(allProxies, "DIRECT", "REJECT")
+		allProxies = appendUnique(allProxies, effectiveProxy, "DIRECT", "REJECT")
 
 		if effectiveProxy == "" || effectiveProxy == selectedNode.Name {
 			for _, name := range proxyNames {
-				if selectedNode != nil && name == selectedNode.Name {
+				if selectedNode != nil && name == selectedNode.Name && effectiveProxy == selectedNode.Name {
 					continue
 				}
-				allProxies = append(allProxies, name)
+				allProxies = appendUnique(allProxies, name)
 			}
+		}
+
+		globalProxies := make([]string, 0, len(allProxies)+2)
+		globalProxies = appendUnique(globalProxies, effectiveProxy, "Proxy", "Auto", "DIRECT", "REJECT")
+		for _, name := range proxyNames {
+			globalProxies = appendUnique(globalProxies, name)
 		}
 
 		mihomoConfig.ProxyGroups = []ProxyGroup{
@@ -159,6 +196,11 @@ func GenerateConfig(nodes []subscription.Node, selectedNode *subscription.Node, 
 				Proxies:  proxyNames,
 				URL:      "http://www.gstatic.com/generate_204",
 				Interval: 300,
+			},
+			{
+				Name:    "GLOBAL",
+				Type:    "select",
+				Proxies: globalProxies,
 			},
 		}
 	}

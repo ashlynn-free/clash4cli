@@ -32,6 +32,9 @@ node_detail:
   testing: "Menguji..."
   not_tested: "Belum diuji"
   no_proxy: "Tidak ada slot proxy aktif"
+  ip_info: "Info IP"
+  location: "Lokasi"
+  org: "Organisasi"
 
 subscription:
   name: "Nama"

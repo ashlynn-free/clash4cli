@@ -25,6 +25,12 @@ type SlotIndicator struct {
 	Icon   string // "📜" or "🌐"
 }
 
+// scrollState remembers cursor and viewport offset for a subscription.
+type scrollState struct {
+	selected int
+	offset   int
+}
+
 // NodesTab represents the nodes tab
 type NodesTab struct {
 	table          *components.Table
@@ -36,6 +42,8 @@ type NodesTab struct {
 	cancelTest     context.CancelFunc
 	resultCh       <-chan node.TestResult
 	subscriptionID string
+	// Per-subscription scroll positions
+	scrollStates map[string]scrollState
 	// Multi-slot indicators: node name → indicator
 	slotIndicators map[string]SlotIndicator
 	// Per-node traffic info for active slots: node name → formatted string
@@ -57,6 +65,7 @@ func NewNodesTab(nodeMgr *node.Manager) *NodesTab {
 		table:          components.NewTable(nil),
 		nodeManager:    nodeMgr,
 		serverDisplay:  "show",
+		scrollStates:   make(map[string]scrollState),
 		slotIndicators: make(map[string]SlotIndicator),
 		slotTraffic:    make(map[string]string),
 		firstLoad:      true,
@@ -198,7 +207,22 @@ func (t *NodesTab) SetSize(width, height int) {
 }
 
 func (t *NodesTab) SetSubscriptionID(subscriptionID string) {
+	// Save scroll state of the previous subscription.
+	if t.subscriptionID != "" {
+		t.scrollStates[t.subscriptionID] = scrollState{
+			selected: t.table.Selected(),
+			offset:   t.table.Offset(),
+		}
+	}
 	t.subscriptionID = subscriptionID
+	// Restore scroll state for the new subscription.
+	if ss, ok := t.scrollStates[subscriptionID]; ok {
+		t.table.SetSelected(ss.selected)
+		t.table.SetOffset(ss.offset)
+	} else {
+		t.table.SetSelected(0)
+		t.table.SetOffset(0)
+	}
 }
 
 func calcNodeTableColumns(width int, serverDisplay string) []components.Column {
@@ -219,7 +243,6 @@ func calcNodeTableColumns(width int, serverDisplay string) []components.Column {
 	if showServer {
 		// serverW will be computed from remaining; the fixed part stays the same.
 	} else {
-		// Without the Server column, we can allocate all remaining width to Name.
 		minServerW = 0
 	}
 	remaining := width - fixed
@@ -245,7 +268,13 @@ func calcNodeTableColumns(width int, serverDisplay string) []components.Column {
 			nameW = remaining / 2
 			serverW = remaining - nameW
 		} else {
+			// Server 列关闭时，限制 Name 宽度，多余空间给 Status 列
 			nameW = remaining
+			if nameW > baseNameW {
+				extra := nameW - baseNameW
+				nameW = baseNameW
+				statusW += extra
+			}
 			serverW = 0
 		}
 	}

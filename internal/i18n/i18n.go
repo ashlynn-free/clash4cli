@@ -62,6 +62,9 @@ type NodeDetailMessages struct {
 	Testing      string `yaml:"testing"`
 	NotTested    string `yaml:"not_tested"`
 	NoProxy      string `yaml:"no_proxy"`
+	IPInfo       string `yaml:"ip_info"`
+	Location     string `yaml:"location"`
+	Org          string `yaml:"org"`
 }
 
 type SubscriptionMessages struct {

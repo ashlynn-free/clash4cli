@@ -56,23 +56,41 @@ func (t *Table) SetHeight(height int) {
 	t.height = height
 }
 
-// MoveUp moves selection up
+// MoveUp moves selection up, wrapping to the bottom when at the top.
 func (t *Table) MoveUp() {
+	if len(t.rows) == 0 {
+		return
+	}
 	if t.selected > 0 {
 		t.selected--
 		if t.selected < t.offset {
 			t.offset = t.selected
 		}
+	} else {
+		// Wrap to bottom
+		t.selected = len(t.rows) - 1
+		if len(t.rows) > t.height {
+			t.offset = len(t.rows) - t.height
+		} else {
+			t.offset = 0
+		}
 	}
 }
 
-// MoveDown moves selection down
+// MoveDown moves selection down, wrapping to the top when at the bottom.
 func (t *Table) MoveDown() {
+	if len(t.rows) == 0 {
+		return
+	}
 	if t.selected < len(t.rows)-1 {
 		t.selected++
 		if t.selected >= t.offset+t.height {
 			t.offset = t.selected - t.height + 1
 		}
+	} else {
+		// Wrap to top
+		t.selected = 0
+		t.offset = 0
 	}
 }
 
@@ -107,6 +125,19 @@ func (t *Table) SetSelected(index int) {
 			t.offset = 0
 		}
 	}
+}
+
+// Offset returns the current scroll offset (top visible row index).
+func (t *Table) Offset() int {
+	return t.offset
+}
+
+// SetOffset sets the scroll offset directly.
+func (t *Table) SetOffset(offset int) {
+	if offset < 0 {
+		offset = 0
+	}
+	t.offset = offset
 }
 
 // SelectedRow returns the selected row data

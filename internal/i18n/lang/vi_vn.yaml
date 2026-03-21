@@ -32,6 +32,9 @@ node_detail:
   testing: "Đang kiểm tra..."
   not_tested: "Chưa kiểm tra"
   no_proxy: "Không có slot proxy hoạt động"
+  ip_info: "Thông tin IP"
+  location: "Vị trí"
+  org: "Tổ chức"
 
 subscription:
   name: "Tên"

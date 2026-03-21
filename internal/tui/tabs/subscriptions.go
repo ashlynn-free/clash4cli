@@ -597,8 +597,12 @@ func (t *SubscriptionsTab) updateTableRows() {
 			url = url[:37] + "..."
 		}
 
+		name := sub.Name
+		if subscription.IsCustomSubscription(sub) {
+			name = "📌 " + name
+		}
 		rows[i] = []string{
-			sub.Name,
+			name,
 			fmt.Sprintf("%d", len(sub.Nodes)),
 			last,
 			url,

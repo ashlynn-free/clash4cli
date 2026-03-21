@@ -110,3 +110,27 @@ func updateMultiLockFile(mut func(*MultiLockFile)) error {
 	mut(mlf)
 	return writeMultiLockFile(mlf)
 }
+
+func readSlotLockFile(slotID int) (*LockFile, error) {
+	mlf, err := ReadMultiLockFile()
+	if err != nil {
+		return nil, err
+	}
+	if mlf == nil || len(mlf.Instances) == 0 {
+		return nil, os.ErrNotExist
+	}
+
+	lock, ok := mlf.Instances[slotID]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+
+	lockCopy := lock
+	return &lockCopy, nil
+}
+
+func removeSlotLockFile(slotID int) error {
+	return updateMultiLockFile(func(mlf *MultiLockFile) {
+		delete(mlf.Instances, slotID)
+	})
+}

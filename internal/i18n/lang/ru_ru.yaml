@@ -32,6 +32,9 @@ node_detail:
   testing: "Тестирование..."
   not_tested: "Не протестировано"
   no_proxy: "Нет активного прокси-слота"
+  ip_info: "IP-информация"
+  location: "Местоположение"
+  org: "Организация"
 
 subscription:
   name: "Имя"

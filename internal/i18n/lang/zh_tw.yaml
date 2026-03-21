@@ -32,6 +32,9 @@ node_detail:
   testing: "測試中..."
   not_tested: "未測試"
   no_proxy: "沒有活躍的代理槽"
+  ip_info: "IP 資訊"
+  location: "位置"
+  org: "組織"
 
 subscription:
   name: "名稱"

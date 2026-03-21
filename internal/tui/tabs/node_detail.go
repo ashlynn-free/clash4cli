@@ -31,6 +31,11 @@ type SiteTestResultMsg struct {
 // SiteTestAllDoneMsg signals all site tests finished.
 type SiteTestAllDoneMsg struct{}
 
+// IPInfoResultMsg carries the result of an IP info lookup.
+type IPInfoResultMsg struct {
+	Result proxy.IPInfoResult
+}
+
 type siteTestEntry struct {
 	Name    string
 	URL     string
@@ -41,14 +46,16 @@ type siteTestEntry struct {
 
 // NodeDetailView shows full node info and website tests.
 type NodeDetailView struct {
-	node      subscription.Node
-	width     int
-	height    int
-	scrollY   int
-	sites     []siteTestEntry
-	testing   bool
-	resultCh  <-chan SiteTestResultMsg
-	probeLock *proxy.LockFile
+	node          subscription.Node
+	width         int
+	height        int
+	scrollY       int
+	sites         []siteTestEntry
+	testing       bool
+	resultCh      <-chan SiteTestResultMsg
+	probeLock     *proxy.LockFile
+	ipInfo        *proxy.IPInfoResult
+	ipInfoTesting bool
 }
 
 var defaultTestSites = []siteTestEntry{
@@ -111,6 +118,11 @@ func (v *NodeDetailView) Update(msg tea.Msg) (*NodeDetailView, tea.Cmd) {
 	case SiteTestAllDoneMsg:
 		v.testing = false
 		v.resultCh = nil
+
+	case IPInfoResultMsg:
+		v.ipInfoTesting = false
+		result := msg.Result
+		v.ipInfo = &result
 	}
 
 	return v, nil
@@ -164,6 +176,28 @@ func (v *NodeDetailView) View() string {
 	}
 	lines = append(lines, "")
 
+	// IP Info
+	lines = append(lines, styles.Primary.Render("── "+m.NodeDetail.IPInfo+" ──"))
+	if v.ipInfoTesting {
+		lines = append(lines, "  "+styles.NodeTesting.Render(m.NodeDetail.Testing))
+	} else if v.ipInfo != nil {
+		if v.ipInfo.Error != "" {
+			lines = append(lines, "  "+styles.NodeOffline.Render(v.ipInfo.Error))
+		} else {
+			lines = append(lines, styles.HelpKey.Render("  IP: ")+v.ipInfo.IP)
+			location := joinNonEmpty(", ", v.ipInfo.City, v.ipInfo.Region, v.ipInfo.Country)
+			if location != "" {
+				lines = append(lines, styles.HelpKey.Render("  "+m.NodeDetail.Location+": ")+location)
+			}
+			if v.ipInfo.Org != "" {
+				lines = append(lines, styles.HelpKey.Render("  "+m.NodeDetail.Org+": ")+v.ipInfo.Org)
+			}
+		}
+	} else {
+		lines = append(lines, "  "+styles.Muted.Render(m.NodeDetail.NotTested))
+	}
+	lines = append(lines, "")
+
 	// Help bar
 	help := styles.HelpKey.Render("Esc") + styles.HelpText.Render(" "+m.Actions.Back+"  ") +
 		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
@@ -209,13 +243,15 @@ func formatSiteLatency(ms int64) string {
 	}
 }
 
-// testAllSites starts website tests for all sites.
+// testAllSites starts website tests and IP info lookup for all sites.
 func (v *NodeDetailView) testAllSites() tea.Cmd {
 	if v.testing {
 		return nil
 	}
 
 	v.testing = true
+	v.ipInfoTesting = true
+	v.ipInfo = nil
 	for i := range v.sites {
 		v.sites[i].Latency = 0
 		v.sites[i].Error = ""
@@ -229,25 +265,38 @@ func (v *NodeDetailView) testAllSites() tea.Cmd {
 	sites := make([]siteTestEntry, len(v.sites))
 	copy(sites, v.sites)
 
-	go func() {
-		defer close(ch)
-		if v.probeLock == nil {
+	if v.probeLock == nil {
+		// No running slot: use a single temporary core for both site tests and IP info.
+		ipCh := make(chan IPInfoResultMsg, 1)
+
+		go func() {
+			defer close(ch)
+			defer close(ipCh)
+
 			urls := make([]string, 0, len(sites))
 			for _, site := range sites {
 				urls = append(urls, site.URL)
 			}
-			results, err := proxy.ProbeSitesWithTemporaryCore(v.node, 5*time.Second, urls)
-			if err != nil {
+			siteResults, ipInfo, err := proxy.ProbeSitesAndIPInfoWithTemporaryCore(v.node, 5*time.Second, urls)
+			if err != nil && len(siteResults) == 0 {
 				for i := range sites {
 					ch <- SiteTestResultMsg{Index: i, Latency: -1, Error: err.Error()}
 				}
+				ipCh <- IPInfoResultMsg{Result: proxy.IPInfoResult{Error: err.Error()}}
 				return
 			}
-			for i, result := range results {
+			for i, result := range siteResults {
 				ch <- SiteTestResultMsg{Index: i, Latency: result.Delay, Error: result.Error}
 			}
-			return
-		}
+			ipCh <- IPInfoResultMsg{Result: ipInfo}
+		}()
+
+		return tea.Batch(waitForSiteResult(ch), waitForIPInfo(ipCh))
+	}
+
+	// Running slot: site tests via API, IP info via proxy port concurrently.
+	go func() {
+		defer close(ch)
 
 		apiHost := "127.0.0.1"
 		if v.probeLock.APIHost != "" {
@@ -310,7 +359,20 @@ func (v *NodeDetailView) testAllSites() tea.Cmd {
 		}
 	}()
 
-	return waitForSiteResult(ch)
+	return tea.Batch(waitForSiteResult(ch), v.fetchIPInfoViaProxy())
+}
+
+// fetchIPInfoViaProxy returns a tea.Cmd that fetches IP info through the running proxy.
+func (v *NodeDetailView) fetchIPInfoViaProxy() tea.Cmd {
+	proxyHost := v.probeLock.ProxyHost
+	if proxyHost == "" {
+		proxyHost = "127.0.0.1"
+	}
+	port := v.probeLock.Port
+	return func() tea.Msg {
+		result := proxy.ProbeIPInfoViaProxy(proxyHost, port, 10*time.Second)
+		return IPInfoResultMsg{Result: result}
+	}
 }
 
 func waitForSiteResult(ch <-chan SiteTestResultMsg) tea.Cmd {
@@ -321,4 +383,24 @@ func waitForSiteResult(ch <-chan SiteTestResultMsg) tea.Cmd {
 		}
 		return result
 	}
+}
+
+func waitForIPInfo(ch <-chan IPInfoResultMsg) tea.Cmd {
+	return func() tea.Msg {
+		result, ok := <-ch
+		if !ok {
+			return IPInfoResultMsg{Result: proxy.IPInfoResult{Error: "channel closed"}}
+		}
+		return result
+	}
+}
+
+func joinNonEmpty(sep string, parts ...string) string {
+	var nonEmpty []string
+	for _, p := range parts {
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	return strings.Join(nonEmpty, sep)
 }

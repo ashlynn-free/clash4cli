@@ -95,6 +95,7 @@ func TestGenerateConfig_ProxyGroupsOrder(t *testing.T) {
 	}
 	var proxyGroup *ProxyGroup
 	var autoGroup *ProxyGroup
+	var globalGroup *ProxyGroup
 	for i := range m.ProxyGroups {
 		g := &m.ProxyGroups[i]
 		switch g.Name {
@@ -102,10 +103,12 @@ func TestGenerateConfig_ProxyGroupsOrder(t *testing.T) {
 			proxyGroup = g
 		case "Auto":
 			autoGroup = g
+		case "GLOBAL":
+			globalGroup = g
 		}
 	}
-	if proxyGroup == nil || autoGroup == nil {
-		t.Fatalf("expected Proxy and Auto groups, got %#v", m.ProxyGroups)
+	if proxyGroup == nil || autoGroup == nil || globalGroup == nil {
+		t.Fatalf("expected Proxy, Auto and GLOBAL groups, got %#v", m.ProxyGroups)
 	}
 	if proxyGroup.Type != "select" {
 		t.Fatalf("expected Proxy group type=select, got %q", proxyGroup.Type)
@@ -124,6 +127,15 @@ func TestGenerateConfig_ProxyGroupsOrder(t *testing.T) {
 	}
 	if len(autoGroup.Proxies) != 2 || autoGroup.Proxies[0] != "A" || autoGroup.Proxies[1] != "B" {
 		t.Fatalf("unexpected Auto group proxies: %#v", autoGroup.Proxies)
+	}
+	wantGlobal := []string{"A", "Proxy", "Auto", "DIRECT", "REJECT", "B"}
+	if len(globalGroup.Proxies) != len(wantGlobal) {
+		t.Fatalf("unexpected GLOBAL group entries: %#v", globalGroup.Proxies)
+	}
+	for i := range wantGlobal {
+		if globalGroup.Proxies[i] != wantGlobal[i] {
+			t.Fatalf("unexpected GLOBAL group order: %#v", globalGroup.Proxies)
+		}
 	}
 }
 
@@ -152,14 +164,15 @@ func TestGenerateConfig_NoNodesNoGroups(t *testing.T) {
 
 func TestGenerateConfig_SlotUpstreamUsesDialerProxy(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.SetSlotUpstream(2, config.UpstreamProxyConfig{
-		Enabled:  true,
+	upID := cfg.AddUpstreamProxy(config.UpstreamProxyEntry{
+		Label:    "Test Gateway",
 		Protocol: "https",
 		Server:   "gateway.example.com",
 		Port:     443,
 		Username: "alice",
 		Password: "secret",
 	})
+	cfg.SetSlotUpstreamRef(2, upID)
 
 	nodes := []subscription.Node{
 		{
@@ -208,14 +221,17 @@ func TestGenerateConfig_SlotUpstreamUsesDialerProxy(t *testing.T) {
 	}
 
 	var proxyGroup *ProxyGroup
+	var globalGroup *ProxyGroup
 	for i := range m.ProxyGroups {
-		if m.ProxyGroups[i].Name == "Proxy" {
+		switch m.ProxyGroups[i].Name {
+		case "Proxy":
 			proxyGroup = &m.ProxyGroups[i]
-			break
+		case "GLOBAL":
+			globalGroup = &m.ProxyGroups[i]
 		}
 	}
-	if proxyGroup == nil {
-		t.Fatalf("expected Proxy group, got %#v", m.ProxyGroups)
+	if proxyGroup == nil || globalGroup == nil {
+		t.Fatalf("expected Proxy and GLOBAL groups, got %#v", m.ProxyGroups)
 	}
 	want := []string{"slot-2-upstream", "DIRECT", "REJECT"}
 	if len(proxyGroup.Proxies) != len(want) {
@@ -225,5 +241,64 @@ func TestGenerateConfig_SlotUpstreamUsesDialerProxy(t *testing.T) {
 		if proxyGroup.Proxies[i] != want[i] {
 			t.Fatalf("unexpected Proxy group entries: %#v", proxyGroup.Proxies)
 		}
+	}
+	wantGlobal := []string{"slot-2-upstream", "Proxy", "Auto", "DIRECT", "REJECT", "A"}
+	if len(globalGroup.Proxies) != len(wantGlobal) {
+		t.Fatalf("unexpected GLOBAL group entries: %#v", globalGroup.Proxies)
+	}
+	for i := range wantGlobal {
+		if globalGroup.Proxies[i] != wantGlobal[i] {
+			t.Fatalf("unexpected GLOBAL group entries: %#v", globalGroup.Proxies)
+		}
+	}
+}
+
+func TestGenerateConfigWithMode_Global(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	nodes := []subscription.Node{
+		{
+			Name:   "A",
+			Type:   "ss",
+			Server: "1.1.1.1",
+			Port:   1111,
+			Settings: map[string]any{
+				"cipher":   "aes-128-gcm",
+				"password": "pass",
+			},
+		},
+		{
+			Name:   "B",
+			Type:   "ss",
+			Server: "2.2.2.2",
+			Port:   2222,
+			Settings: map[string]any{
+				"cipher":   "aes-256-gcm",
+				"password": "pass2",
+			},
+		},
+	}
+	selected := &nodes[1]
+
+	m, err := GenerateConfigWithMode(nodes, selected, cfg, 0, 12345, 19090, "127.0.0.1", 0, "global")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithMode: %v", err)
+	}
+	if m.Mode != "global" {
+		t.Fatalf("expected Mode=global, got %q", m.Mode)
+	}
+
+	var globalGroup *ProxyGroup
+	for i := range m.ProxyGroups {
+		if m.ProxyGroups[i].Name == "GLOBAL" {
+			globalGroup = &m.ProxyGroups[i]
+			break
+		}
+	}
+	if globalGroup == nil {
+		t.Fatalf("expected GLOBAL group, got %#v", m.ProxyGroups)
+	}
+	if len(globalGroup.Proxies) == 0 || globalGroup.Proxies[0] != "B" {
+		t.Fatalf("expected selected node B to be first GLOBAL entry, got %#v", globalGroup.Proxies)
 	}
 }

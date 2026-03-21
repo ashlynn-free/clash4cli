@@ -32,6 +32,9 @@ node_detail:
   testing: "Testando..."
   not_tested: "Não testado"
   no_proxy: "Nenhum slot de proxy ativo"
+  ip_info: "Info IP"
+  location: "Localização"
+  org: "Organização"
 
 subscription:
   name: "Nome"

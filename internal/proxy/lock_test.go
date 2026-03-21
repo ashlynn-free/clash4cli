@@ -114,3 +114,115 @@ func TestReadLockFile_ReadsSlot0FromMultiLock(t *testing.T) {
 		t.Fatalf("expected slot0 lock, got %#v", got)
 	}
 }
+
+func TestReadSlotLockFile_ReadsRequestedSlot(t *testing.T) {
+	setupTestHome(t)
+
+	mlf := &MultiLockFile{
+		Version: 2,
+		Instances: map[int]LockFile{
+			1: {Port: 17891, APIPort: 19091, PID: 11, Node: "slot1"},
+			2: {Port: 17892, APIPort: 19092, PID: 22, Node: "slot2"},
+		},
+	}
+	if err := writeMultiLockFile(mlf); err != nil {
+		t.Fatalf("writeMultiLockFile: %v", err)
+	}
+
+	got, err := readSlotLockFile(2)
+	if err != nil {
+		t.Fatalf("readSlotLockFile: %v", err)
+	}
+	if got.Node != "slot2" || got.Port != 17892 {
+		t.Fatalf("expected slot2 lock, got %#v", got)
+	}
+}
+
+func TestControllerReadLockFile_UsesManagedSlotWhenMultiInstance(t *testing.T) {
+	setupTestHome(t)
+
+	mlf := &MultiLockFile{
+		Version: 2,
+		Instances: map[int]LockFile{
+			1: {Port: 17891, APIPort: 19091, PID: 11, Node: "slot1"},
+			2: {Port: 17892, APIPort: 19092, PID: 22, Node: "slot2"},
+		},
+	}
+	if err := writeMultiLockFile(mlf); err != nil {
+		t.Fatalf("writeMultiLockFile: %v", err)
+	}
+
+	c := &Controller{lockSlotID: 2, multiInstanceLock: true}
+	got, err := c.readLockFile()
+	if err != nil {
+		t.Fatalf("readLockFile: %v", err)
+	}
+	if got.Node != "slot2" || got.Port != 17892 {
+		t.Fatalf("expected managed slot2 lock, got %#v", got)
+	}
+}
+
+func TestControllerRemoveLockFile_RemovesOnlyManagedSlot(t *testing.T) {
+	setupTestHome(t)
+
+	mlf := &MultiLockFile{
+		Version: 2,
+		Instances: map[int]LockFile{
+			1: {Port: 17891, APIPort: 19091, PID: 11, Node: "slot1"},
+			2: {Port: 17892, APIPort: 19092, PID: 22, Node: "slot2"},
+		},
+	}
+	if err := writeMultiLockFile(mlf); err != nil {
+		t.Fatalf("writeMultiLockFile: %v", err)
+	}
+
+	c := &Controller{lockSlotID: 2, multiInstanceLock: true}
+	c.removeLockFile()
+
+	got, err := ReadMultiLockFile()
+	if err != nil {
+		t.Fatalf("ReadMultiLockFile: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected lock file to remain for slot1")
+	}
+	if _, ok := got.Instances[1]; !ok {
+		t.Fatalf("expected slot1 lock to remain, got %#v", got.Instances)
+	}
+	if _, ok := got.Instances[2]; ok {
+		t.Fatalf("expected slot2 lock to be removed, got %#v", got.Instances)
+	}
+}
+
+func TestControllerRemoveLockFile_DeletesFileWhenLastSlotRemoved(t *testing.T) {
+	setupTestHome(t)
+
+	mlf := &MultiLockFile{
+		Version: 2,
+		Instances: map[int]LockFile{
+			2: {Port: 17892, APIPort: 19092, PID: 22, Node: "slot2"},
+		},
+	}
+	if err := writeMultiLockFile(mlf); err != nil {
+		t.Fatalf("writeMultiLockFile: %v", err)
+	}
+
+	c := &Controller{lockSlotID: 2, multiInstanceLock: true}
+	c.removeLockFile()
+
+	got, err := ReadMultiLockFile()
+	if err != nil {
+		t.Fatalf("ReadMultiLockFile: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected lock file to be deleted, got %#v", got)
+	}
+
+	lockPath, err := config.GetLockFilePath()
+	if err != nil {
+		t.Fatalf("GetLockFilePath: %v", err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected lock file to be removed, stat err=%v", err)
+	}
+}

@@ -10,12 +10,13 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Proxy        ProxyConfig        `yaml:"proxy"`
-	Subscription SubscriptionConfig `yaml:"subscription"`
-	Slots        []SlotConfig       `yaml:"slots,omitempty"`
-	Language     string             `yaml:"language"`
-	SpeedTest    SpeedTestConfig    `yaml:"speedtest"`
-	UI           UIConfig           `yaml:"ui"`
+	Proxy           ProxyConfig          `yaml:"proxy"`
+	Subscription    SubscriptionConfig   `yaml:"subscription"`
+	UpstreamProxies []UpstreamProxyEntry `yaml:"upstream_proxies,omitempty"`
+	Slots           []SlotConfig         `yaml:"slots,omitempty"`
+	Language        string               `yaml:"language"`
+	SpeedTest       SpeedTestConfig      `yaml:"speedtest"`
+	UI              UIConfig             `yaml:"ui"`
 }
 
 // ProxyConfig represents proxy port configuration
@@ -37,10 +38,22 @@ type SubscriptionConfig struct {
 	UpdateViaProxy bool `yaml:"update_via_proxy"`
 }
 
+// UpstreamProxyEntry is a named, reusable upstream proxy definition stored in the registry.
+type UpstreamProxyEntry struct {
+	ID       string `yaml:"id"`
+	Label    string `yaml:"label"`
+	Protocol string `yaml:"protocol,omitempty"`
+	Server   string `yaml:"server,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
+}
+
 // SlotConfig stores per-slot persisted settings.
 type SlotConfig struct {
-	ID       int                 `yaml:"id"`
-	Upstream UpstreamProxyConfig `yaml:"upstream,omitempty"`
+	ID         int                 `yaml:"id"`
+	UpstreamID string              `yaml:"upstream_id,omitempty"`
+	Upstream   UpstreamProxyConfig `yaml:"upstream,omitempty"` // legacy; migrated to UpstreamID
 }
 
 // UpstreamProxyConfig describes an optional upstream HTTP/HTTPS/SOCKS5 proxy.
@@ -133,6 +146,7 @@ func Load() (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.migrateInlineUpstreams()
 	cfg.normalizeSlots()
 
 	return cfg, nil

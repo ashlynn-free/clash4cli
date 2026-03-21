@@ -68,6 +68,11 @@ func (sm *SlotManager) LogChannel() <-chan LogEntry {
 
 // StartSlot starts a proxy instance in the given slot.
 func (sm *SlotManager) StartSlot(slotID int, subID string, nodes []subscription.Node, selected *subscription.Node) error {
+	return sm.StartSlotWithMode(slotID, subID, nodes, selected, "rule")
+}
+
+// StartSlotWithMode starts a proxy instance in the given slot with an explicit initial mode.
+func (sm *SlotManager) StartSlotWithMode(slotID int, subID string, nodes []subscription.Node, selected *subscription.Node, mode string) error {
 	if slotID < 0 || slotID >= MaxSlots {
 		return fmt.Errorf("invalid slot ID: %d", slotID)
 	}
@@ -93,7 +98,8 @@ func (sm *SlotManager) StartSlot(slotID int, subID string, nodes []subscription.
 
 	// Create and start the slot controller
 	sc := NewSlotController(slotID, sm.cfg)
-	if err := sc.Start(subID, nodes, selected, forbidden); err != nil {
+	initialMode := normalizeProxyMode(mode)
+	if err := sc.StartWithMode(subID, nodes, selected, forbidden, initialMode); err != nil {
 		return err
 	}
 
@@ -101,7 +107,7 @@ func (sm *SlotManager) StartSlot(slotID int, subID string, nodes []subscription.
 	sm.cleanSlotLocked(slotID)
 
 	sm.slots[slotID] = sc
-	sm.slotModes[slotID] = "rule"
+	sm.slotModes[slotID] = initialMode
 	sm.slotNodes[slotID] = selected.Name
 	sm.slotSubIDs[slotID] = subID
 	sm.nodeToSlot[selected.Name] = slotID

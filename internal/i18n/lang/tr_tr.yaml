@@ -32,6 +32,9 @@ node_detail:
   testing: "Test ediliyor..."
   not_tested: "Test edilmedi"
   no_proxy: "Aktif proxy yuvası yok"
+  ip_info: "IP Bilgisi"
+  location: "Konum"
+  org: "Kuruluş"
 
 subscription:
   name: "Ad"

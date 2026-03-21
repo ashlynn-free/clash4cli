@@ -48,6 +48,22 @@ type hideOverlayMsg struct {
 type splashDoneMsg struct{}
 
 const splashCooldown = 24 * time.Hour
+const slotDoublePressWindow = 250 * time.Millisecond
+
+type slotActionKind int
+
+const (
+	slotActionQueueGlobal slotActionKind = iota
+	slotActionStartRule
+	slotActionStop
+)
+
+type pendingSlotAction struct {
+	slotID int
+	seq    int
+	subID  string
+	node   subscription.Node
+}
 
 // Model represents the main TUI model
 type Model struct {
@@ -71,6 +87,8 @@ type Model struct {
 	selectedNode   *subscription.Node
 	overlayText    string
 	overlayID      int
+	slotActionSeq  int
+	pendingSlots   map[int]pendingSlotAction
 
 	// Per-slot traffic tracking (slot → last snapshot)
 	slotTrafficLast map[int]trafficSnapshot
@@ -106,6 +124,7 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		version:         strings.TrimSpace(version),
 		startupWarning:  strings.TrimSpace(startupWarning),
 		slotTrafficLast: make(map[int]trafficSnapshot),
+		pendingSlots:    make(map[int]pendingSlotAction),
 	}
 
 	if m.nodesTab != nil {
@@ -672,11 +691,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Build per-node traffic string
 			state := m.slotMgr.GetSlotState(slotID)
 			if state != nil && state.NodeName != "" {
-				nodeTraffic[state.NodeName] = fmt.Sprintf(":%d ↑%s ↓%s",
+				upstreamLabel := ""
+				if state.UpstreamEnabled {
+					if ref, ok := m.cfg.GetSlotUpstreamRef(slotID); ok && ref != "" {
+						if entry, found := m.cfg.GetUpstreamProxy(ref); found && entry.Label != "" {
+							upstreamLabel = entry.Label
+						}
+					}
+				}
+				trafficStr := fmt.Sprintf(":%d ↑%s ↓%s",
 					state.Port,
 					components.FormatRate(upRate),
 					components.FormatRate(downRate),
 				)
+				if upstreamLabel != "" {
+					trafficStr += " " + upstreamLabel
+				}
+				nodeTraffic[state.NodeName] = trafficStr
 			}
 		}
 
@@ -696,6 +727,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.nodesTab != nil {
 			m.nodesTab.SetSlotTraffic(nodeTraffic)
 		}
+
+	case slotActionCommitMsg:
+		pending, ok := m.pendingSlots[msg.slotID]
+		if !ok || pending.seq != msg.seq {
+			break
+		}
+		delete(m.pendingSlots, msg.slotID)
+		cmds = append(cmds, m.startSlotWithMode(msg.slotID, pending.subID, &pending.node, "global"))
 
 	case slotActionDoneMsg:
 		if msg.err != nil {
@@ -842,6 +881,9 @@ func (m *Model) renderSubTabs() string {
 			continue
 		}
 		label := sub.Name
+		if subscription.IsCustomSubscription(sub) {
+			label = "📌 " + label
+		}
 		var text string
 		if i == activeIdx {
 			text = styles.ActiveTab.Render(label)
@@ -1017,6 +1059,11 @@ type slotActionDoneMsg struct {
 	err    error
 }
 
+type slotActionCommitMsg struct {
+	slotID int
+	seq    int
+}
+
 type slotTrafficMsg struct {
 	snapshots map[int]trafficSnapshot
 }
@@ -1036,6 +1083,30 @@ func digitKeyToSlot(msg tea.KeyMsg) int {
 		return int(msg.Runes[0] - '0')
 	}
 	return 0
+}
+
+func samePendingSlotAction(p pendingSlotAction, subID string, node *subscription.Node) bool {
+	if node == nil {
+		return false
+	}
+	return p.subID == subID && sameNode(&p.node, node)
+}
+
+func sameSlotSelection(state *proxy.SlotState, subID string, node *subscription.Node) bool {
+	if state == nil || node == nil {
+		return false
+	}
+	return state.SubID == subID && state.NodeName == node.Name
+}
+
+func resolveSlotAction(state *proxy.SlotState, pending *pendingSlotAction, subID string, node *subscription.Node) slotActionKind {
+	if sameSlotSelection(state, subID, node) {
+		return slotActionStop
+	}
+	if pending != nil && samePendingSlotAction(*pending, subID, node) {
+		return slotActionStartRule
+	}
+	return slotActionQueueGlobal
 }
 
 func (m *Model) handleSlotAction(slotID int) tea.Cmd {
@@ -1065,60 +1136,82 @@ func (m *Model) handleSlotAction(slotID int) tea.Cmd {
 
 	persistCmd := m.persistSelectedNode(m.activeSubID, focused)
 
-	existingSlot, nodeInUse := m.slotMgr.NodeSlot(focused.Name)
 	state := m.slotMgr.GetSlotState(slotID)
+	var pending *pendingSlotAction
+	if p, ok := m.pendingSlots[slotID]; ok {
+		pending = &p
+	}
 
-	if state == nil {
-		// Slot not running → start it
-		if nodeInUse && existingSlot != slotID {
-			// Node used in another slot → free it first
-			return tea.Batch(persistCmd, m.switchSlotToNode(slotID, existingSlot, focused))
+	switch resolveSlotAction(state, pending, m.activeSubID, focused) {
+	case slotActionStop:
+		delete(m.pendingSlots, slotID)
+		return tea.Batch(persistCmd, func() tea.Msg {
+			err := m.slotMgr.StopSlot(slotID)
+			return slotActionDoneMsg{slotID: slotID, err: err}
+		})
+	case slotActionStartRule:
+		delete(m.pendingSlots, slotID)
+		return tea.Batch(persistCmd, m.startSlotWithMode(slotID, m.activeSubID, focused, "rule"))
+	default:
+		m.slotActionSeq++
+		seq := m.slotActionSeq
+		m.pendingSlots[slotID] = pendingSlotAction{
+			slotID: slotID,
+			seq:    seq,
+			subID:  m.activeSubID,
+			node:   *focused,
 		}
-		subID := m.activeSubID
-		nodeCopy := *focused
-		nodes := m.subManager.GetNodesForSubscription(subID)
-		return tea.Batch(persistCmd, func() tea.Msg {
-			err := m.slotMgr.StartSlot(slotID, subID, nodes, &nodeCopy)
-			return slotActionDoneMsg{slotID: slotID, err: err}
-		})
+		return tea.Batch(
+			persistCmd,
+			tea.Tick(slotDoublePressWindow, func(time.Time) tea.Msg {
+				return slotActionCommitMsg{slotID: slotID, seq: seq}
+			}),
+		)
 	}
-
-	if state.NodeName == focused.Name {
-		// Same node → cycle mode (rule → global → stop)
-		return tea.Batch(persistCmd, func() tea.Msg {
-			_, err := m.slotMgr.CycleSlotMode(slotID)
-			return slotActionDoneMsg{slotID: slotID, err: err}
-		})
-	}
-
-	// Slot running with different node → stop old, start with new node
-	return tea.Batch(persistCmd, m.restartSlotWithNode(slotID, focused))
 }
 
-// restartSlotWithNode stops a running slot and restarts it with a new node.
-func (m *Model) restartSlotWithNode(slotID int, node *subscription.Node) tea.Cmd {
+func (m *Model) startSlotWithMode(slotID int, subID string, node *subscription.Node, mode string) tea.Cmd {
+	if node == nil {
+		return func() tea.Msg {
+			return slotActionDoneMsg{slotID: slotID, err: fmt.Errorf("no node selected")}
+		}
+	}
+
 	nodeCopy := *node
-	subID := m.activeSubID
 	return func() tea.Msg {
-		_ = m.slotMgr.StopSlot(slotID)
-		time.Sleep(300 * time.Millisecond)
 		nodes := m.subManager.GetNodesForSubscription(subID)
-		err := m.slotMgr.StartSlot(slotID, subID, nodes, &nodeCopy)
+		var targetNode *subscription.Node
+		for i := range nodes {
+			if sameNode(&nodes[i], &nodeCopy) {
+				targetNode = &nodes[i]
+				break
+			}
+		}
+		if targetNode == nil {
+			return slotActionDoneMsg{slotID: slotID, err: fmt.Errorf("node %q not found for slot %d", nodeCopy.Name, slotID)}
+		}
+
+		currentState := m.slotMgr.GetSlotState(slotID)
+		if sameSlotSelection(currentState, subID, targetNode) {
+			if currentState.Mode == mode {
+				return slotActionDoneMsg{slotID: slotID, err: nil}
+			}
+			err := m.slotMgr.SetSlotMode(slotID, mode)
+			return slotActionDoneMsg{slotID: slotID, err: err}
+		}
+		if currentState != nil {
+			_ = m.slotMgr.StopSlot(slotID)
+			time.Sleep(300 * time.Millisecond)
+		}
+
+		existingSlot, nodeInUse := m.slotMgr.NodeSlot(targetNode.Name)
+		if nodeInUse && existingSlot != slotID {
+			_ = m.slotMgr.StopSlot(existingSlot)
+			time.Sleep(300 * time.Millisecond)
+		}
+
+		err := m.slotMgr.StartSlotWithMode(slotID, subID, nodes, targetNode, mode)
 		return slotActionDoneMsg{slotID: slotID, err: err}
-	}
-}
-
-// switchSlotToNode moves a node from existingSlot to targetSlot.
-// If existingSlot had the node, stop it first; then start targetSlot with the node.
-func (m *Model) switchSlotToNode(targetSlot, existingSlot int, node *subscription.Node) tea.Cmd {
-	nodeCopy := *node
-	subID := m.activeSubID
-	return func() tea.Msg {
-		_ = m.slotMgr.StopSlot(existingSlot)
-		time.Sleep(300 * time.Millisecond)
-		nodes := m.subManager.GetNodesForSubscription(subID)
-		err := m.slotMgr.StartSlot(targetSlot, subID, nodes, &nodeCopy)
-		return slotActionDoneMsg{slotID: targetSlot, err: err}
 	}
 }
 
@@ -1191,7 +1284,7 @@ func (m *Model) restartSlot0() tea.Cmd {
 		_ = m.slotMgr.StopSlot(0)
 		time.Sleep(500 * time.Millisecond)
 
-		err := m.slotMgr.StartSlot(0, m.activeSubID, nodes, m.selectedNode)
+		err := m.slotMgr.StartSlotWithMode(0, m.activeSubID, nodes, m.selectedNode, "rule")
 		return slotActionDoneMsg{slotID: 0, err: err}
 	}
 }
@@ -1223,7 +1316,7 @@ func (m *Model) restartSlot(slotID int) tea.Cmd {
 
 		_ = m.slotMgr.StopSlot(slotID)
 		time.Sleep(500 * time.Millisecond)
-		err := m.slotMgr.StartSlot(slotID, state.SubID, nodes, targetNode)
+		err := m.slotMgr.StartSlotWithMode(slotID, state.SubID, nodes, targetNode, state.Mode)
 		return slotActionDoneMsg{slotID: slotID, err: err}
 	}
 }
@@ -1239,10 +1332,11 @@ func (m *Model) restartAllSlots() tea.Cmd {
 			slotID   int
 			nodeName string
 			subID    string
+			mode     string
 		}
 		var infos []slotInfo
 		for _, s := range active {
-			infos = append(infos, slotInfo{s.SlotID, s.NodeName, s.SubID})
+			infos = append(infos, slotInfo{s.SlotID, s.NodeName, s.SubID, s.Mode})
 			_ = m.slotMgr.StopSlot(s.SlotID)
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -1256,7 +1350,7 @@ func (m *Model) restartAllSlots() tea.Cmd {
 				}
 			}
 			if targetNode != nil {
-				_ = m.slotMgr.StartSlot(info.slotID, info.subID, nodes, targetNode)
+				_ = m.slotMgr.StartSlotWithMode(info.slotID, info.subID, nodes, targetNode, info.mode)
 			}
 		}
 		return slotActionDoneMsg{slotID: -1, err: nil}

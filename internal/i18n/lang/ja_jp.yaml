@@ -32,6 +32,9 @@ node_detail:
   testing: "テスト中..."
   not_tested: "未テスト"
   no_proxy: "アクティブなプロキシスロットがありません"
+  ip_info: "IP 情報"
+  location: "場所"
+  org: "組織"
 
 subscription:
   name: "名前"

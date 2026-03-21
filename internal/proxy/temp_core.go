@@ -124,6 +124,111 @@ func ProbeSitesWithTemporaryCore(node subscription.Node, timeout time.Duration, 
 	return results, nil
 }
 
+// ProbeSitesAndIPInfoWithTemporaryCore starts a temporary mihomo core, runs site
+// delay probes AND fetches IP info via ipinfo.io through the same proxy instance.
+func ProbeSitesAndIPInfoWithTemporaryCore(node subscription.Node, timeout time.Duration, siteURLs []string) ([]SiteDelayProbe, IPInfoResult, error) {
+	if node.Name == "" {
+		return nil, IPInfoResult{Error: "node name empty"}, fmt.Errorf("node name cannot be empty")
+	}
+
+	tempDir, err := os.MkdirTemp("", "rocket4cli-probe-*")
+	if err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to create temp probe dir: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	mixedPort, err := pickTCPPort("127.0.0.1", 0, 0, nil)
+	if err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to allocate probe mixed port: %w", err)
+	}
+	apiPort, err := pickTCPPort("127.0.0.1", 0, 0, map[int]struct{}{mixedPort: {}})
+	if err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to allocate probe api port: %w", err)
+	}
+
+	secret, err := generateSecret()
+	if err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to generate probe api secret: %w", err)
+	}
+
+	nodes := []subscription.Node{node}
+	selected := node
+	cfg, err := GenerateConfig(nodes, &selected, nil, 0, mixedPort, apiPort, "127.0.0.1", 0)
+	if err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to generate probe config: %w", err)
+	}
+	cfg.Secret = secret
+
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := saveConfigToPath(cfg, configPath); err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to write probe config: %w", err)
+	}
+	logPath := filepath.Join(tempDir, "mihomo.log")
+
+	mihomoPath, err := findMihomoBinary()
+	if err != nil {
+		return nil, IPInfoResult{}, err
+	}
+
+	cmd := exec.Command(mihomoPath, "-d", tempDir, "-f", configPath)
+	cmd.Dir = tempDir
+
+	devNull, logFile, err := openProcessFiles(logPath)
+	if err != nil {
+		return nil, IPInfoResult{}, err
+	}
+	defer devNull.Close()
+	defer logFile.Close()
+	cmd.Stdin = devNull
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		return nil, IPInfoResult{}, fmt.Errorf("failed to start temporary core: %w", err)
+	}
+
+	cleanupDone := false
+	defer func() {
+		if cleanupDone {
+			return
+		}
+		_ = terminateProcess(cmd.Process.Pid, 2*time.Second)
+		_, _ = cmd.Process.Wait()
+	}()
+
+	if err := waitForProbeAPI(apiPort, secret, timeout+time.Second); err != nil {
+		return nil, IPInfoResult{}, err
+	}
+
+	if err := switchProbeGroup(apiPort, secret, "Proxy", node.Name); err != nil {
+		return nil, IPInfoResult{}, err
+	}
+
+	// Probe site delays
+	siteResults := make([]SiteDelayProbe, 0, len(siteURLs))
+	for _, siteURL := range siteURLs {
+		result := SiteDelayProbe{}
+		delay, err := probeDelay(apiPort, secret, node.Name, siteURL, timeout)
+		if err != nil {
+			result.Delay = -1
+			result.Error = err.Error()
+		} else {
+			result.Delay = delay
+		}
+		siteResults = append(siteResults, result)
+	}
+
+	// Probe IP info through the same proxy
+	ipInfo := ProbeIPInfoViaProxy("127.0.0.1", mixedPort, timeout)
+
+	cleanupDone = true
+	if err := terminateProcess(cmd.Process.Pid, 2*time.Second); err != nil {
+		return siteResults, ipInfo, err
+	}
+	_, _ = cmd.Process.Wait()
+	return siteResults, ipInfo, nil
+}
+
 func waitForProbeAPI(apiPort int, secret string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	apiURL := fmt.Sprintf("http://127.0.0.1:%d/proxies/Proxy", apiPort)

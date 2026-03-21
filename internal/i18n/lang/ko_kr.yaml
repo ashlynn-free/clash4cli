@@ -32,6 +32,9 @@ node_detail:
   testing: "테스트 중..."
   not_tested: "미테스트"
   no_proxy: "활성 프록시 슬롯 없음"
+  ip_info: "IP 정보"
+  location: "위치"
+  org: "조직"
 
 subscription:
   name: "이름"

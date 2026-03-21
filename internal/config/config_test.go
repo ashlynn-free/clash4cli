@@ -77,11 +77,13 @@ func TestLoad_Save_RoundTrip(t *testing.T) {
 	if cfg2.Proxy.MixedPort != 19999 {
 		t.Fatalf("expected MixedPort=19999, got %d", cfg2.Proxy.MixedPort)
 	}
-	upstream, ok := cfg2.GetSlotUpstream(2)
+	// After reload, the inline upstream is migrated to the registry.
+	// EffectiveUpstreamForSlot should still resolve it.
+	upstream, ok := cfg2.EffectiveUpstreamForSlot(2)
 	if !ok {
-		t.Fatalf("expected slot 2 upstream config to persist")
+		t.Fatalf("expected slot 2 upstream config to persist via registry")
 	}
-	if !upstream.Enabled || upstream.Protocol != "https" || upstream.Server != "gateway.example.com" || upstream.Port != 443 {
+	if upstream.Protocol != "https" || upstream.Server != "gateway.example.com" || upstream.Port != 443 {
 		t.Fatalf("unexpected upstream config after reload: %#v", upstream)
 	}
 }
