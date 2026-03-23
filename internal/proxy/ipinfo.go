@@ -46,7 +46,7 @@ func defaultFetchIPInfo(proxyHost string, proxyPort int, timeout time.Duration) 
 
 	client := &http.Client{
 		Timeout:   timeout,
-		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL), DisableKeepAlives: true},
 	}
 
 	resp, err := client.Get("https://ipinfo.io/json")

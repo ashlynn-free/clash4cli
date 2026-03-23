@@ -63,6 +63,7 @@ settings:
   concurrent: "同時テスト数"
   timeout: "テストタイムアウト"
   server_display: "Server 列 (Host:Port)"
+  speed_unit: "速度表示単位"
   restart_core: "コアを再起動"
   on: "オン"
   off: "オフ"

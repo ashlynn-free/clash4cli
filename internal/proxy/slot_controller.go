@@ -79,6 +79,11 @@ func (sc *SlotController) GetTrafficTotals() (int64, int64, error) {
 	return sc.ctrl.GetTrafficTotals()
 }
 
+// GetTrafficAndConnCount returns traffic totals and active connection count.
+func (sc *SlotController) GetTrafficAndConnCount() (int64, int64, int, error) {
+	return sc.ctrl.GetTrafficAndConnCount()
+}
+
 // GetCoreVersion returns the mihomo core version string.
 func (sc *SlotController) GetCoreVersion() (string, error) {
 	return sc.ctrl.GetCoreVersion()
@@ -291,7 +296,7 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	c.configPath = configPath
 
 	// Find mihomo binary
-	mihomoPath, err := findMihomoBinary()
+	mihomoPath, err := findMihomoBinaryFunc()
 	if err != nil {
 		c.status = StatusError
 		return err
@@ -316,28 +321,11 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	c.logPath = logPath
 
 	// Start mihomo process
-	cmd := exec.Command(mihomoPath, "-d", workDir, "-f", c.configPath)
-	cmd.Dir = workDir
-	configureDetachedCommand(cmd)
-
-	devNull, logFile, err := openProcessFiles(logPath)
+	cmd, err := startMihomoProcess(mihomoPath, workDir, c.configPath, logPath)
 	if err != nil {
 		c.status = StatusError
 		return err
 	}
-	cmd.Stdin = devNull
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Start(); err != nil {
-		_ = devNull.Close()
-		_ = logFile.Close()
-		c.status = StatusError
-		return fmt.Errorf("failed to start mihomo: %w", err)
-	}
-
-	_ = devNull.Close()
-	_ = logFile.Close()
 
 	c.cmd = cmd
 	c.pid = cmd.Process.Pid

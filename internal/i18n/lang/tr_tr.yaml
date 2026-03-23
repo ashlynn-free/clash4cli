@@ -63,6 +63,7 @@ settings:
   concurrent: "Eşzamanlı testler"
   timeout: "Test zaman aşımı"
   server_display: "Server sütunu (Host:Port)"
+  speed_unit: "Hız birimi"
   restart_core: "Çekirdeği yeniden başlat"
   on: "Açık"
   off: "Kapalı"

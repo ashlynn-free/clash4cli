@@ -160,6 +160,11 @@ var serverDisplayOptions = []selectOption{
 	{label: "Off", value: "off"},
 }
 
+var speedUnitOptions = []selectOption{
+	{label: "MB/s (Bytes)", value: "bytes"},
+	{label: "Mbps (Bits)", value: "bits"},
+}
+
 var upstreamProtocolOptions = []selectOption{
 	{label: "HTTP", value: "http"},
 	{label: "HTTPS", value: "https"},
@@ -225,6 +230,14 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 	for i, opt := range serverDisplayOptions {
 		if opt.value == cfg.UI.ServerDisplay {
 			serverDisplayIdx = i
+			break
+		}
+	}
+
+	speedUnitIdx := 0
+	for i, opt := range speedUnitOptions {
+		if opt.value == cfg.UI.SpeedUnit {
+			speedUnitIdx = i
 			break
 		}
 	}
@@ -323,6 +336,13 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 			key:         "server_display",
 			options:     serverDisplayOptions,
 			selectedIdx: serverDisplayIdx,
+		},
+		settingField{
+			label:       i18n.M().Settings.SpeedUnit,
+			fieldType:   FieldTypeSelect,
+			key:         "speed_unit",
+			options:     speedUnitOptions,
+			selectedIdx: speedUnitIdx,
 		},
 		settingField{
 			label:       i18n.M().Settings.Concurrent,
@@ -2174,6 +2194,14 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 					t.cfg.UI.ServerDisplay = v
 				default:
 					return SettingsErrorMsg{Error: fmt.Errorf("invalid server display: %q", v)}
+				}
+			case "speed_unit":
+				v := field.options[field.selectedIdx].value
+				switch v {
+				case "bytes", "bits":
+					t.cfg.UI.SpeedUnit = v
+				default:
+					return SettingsErrorMsg{Error: fmt.Errorf("invalid speed unit: %q", v)}
 				}
 			case "concurrent":
 				n, err := strconv.Atoi(field.input.Value())

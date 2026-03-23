@@ -63,6 +63,7 @@ settings:
   concurrent: "Kiểm thử đồng thời"
   timeout: "Thời gian chờ kiểm thử"
   server_display: "Cột Server (Host:Port)"
+  speed_unit: "Đơn vị tốc độ"
   restart_core: "Khởi động lại lõi"
   on: "Bật"
   off: "Tắt"

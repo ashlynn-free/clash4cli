@@ -98,6 +98,7 @@ type SettingsMessages struct {
 	Concurrent     string `yaml:"concurrent"`
 	Timeout        string `yaml:"timeout"`
 	ServerDisplay  string `yaml:"server_display"`
+	SpeedUnit      string `yaml:"speed_unit"`
 	RestartCore    string `yaml:"restart_core"`
 	On             string `yaml:"on"`
 	Off            string `yaml:"off"`
@@ -107,6 +108,7 @@ type SettingsMessages struct {
 
 type SlotsMessages struct {
 	Title              string `yaml:"title"`
+	Description        string `yaml:"description"`
 	NoProxy            string `yaml:"no_proxy"`
 	NoUpstream         string `yaml:"no_upstream"`
 	Power              string `yaml:"power"`
@@ -132,6 +134,7 @@ type SlotsMessages struct {
 	Restarting         string `yaml:"restarting"`
 	ProxyPickerHint    string `yaml:"proxy_picker_hint"`
 	UpstreamPickerHint string `yaml:"upstream_picker_hint"`
+	MainSlotSuffix     string `yaml:"main_slot_suffix"`
 }
 
 type LogMessages struct {

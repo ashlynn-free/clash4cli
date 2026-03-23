@@ -154,10 +154,7 @@ func GenerateConfigWithMode(nodes []subscription.Node, selectedNode *subscriptio
 	}
 
 	if upstream, ok := cfg.EffectiveUpstreamForSlot(slotID); ok {
-		if selectedNode == nil || strings.TrimSpace(selectedNode.Name) == "" {
-			return nil, fmt.Errorf("slot %d upstream requires a selected node", slotID)
-		}
-		upstreamProxy, upstreamName := buildUpstreamProxy(slotID, *selectedNode, upstream)
+		upstreamProxy, upstreamName := buildUpstreamProxy(slotID, selectedNode, upstream)
 		mihomoConfig.Proxies = append(mihomoConfig.Proxies, upstreamProxy)
 		effectiveProxy = upstreamName
 	}
@@ -169,7 +166,7 @@ func GenerateConfigWithMode(nodes []subscription.Node, selectedNode *subscriptio
 		allProxies := make([]string, 0, len(proxyNames)+2)
 		allProxies = appendUnique(allProxies, effectiveProxy, "DIRECT", "REJECT")
 
-		if effectiveProxy == "" || effectiveProxy == selectedNode.Name {
+		if effectiveProxy == "" || (selectedNode != nil && effectiveProxy == selectedNode.Name) {
 			for _, name := range proxyNames {
 				if selectedNode != nil && name == selectedNode.Name && effectiveProxy == selectedNode.Name {
 					continue
@@ -203,6 +200,37 @@ func GenerateConfigWithMode(nodes []subscription.Node, selectedNode *subscriptio
 				Proxies: globalProxies,
 			},
 		}
+	} else if effectiveProxy != "" {
+		// Upstream-only mode: no subscription nodes, but we have an upstream proxy.
+		// Create minimal proxy groups without Auto (no nodes to url-test).
+		allProxies := []string{effectiveProxy, "DIRECT", "REJECT"}
+		globalProxies := []string{effectiveProxy, "Proxy", "DIRECT", "REJECT"}
+		mihomoConfig.ProxyGroups = []ProxyGroup{
+			{
+				Name:    "Proxy",
+				Type:    "select",
+				Proxies: allProxies,
+			},
+			{
+				Name:    "GLOBAL",
+				Type:    "select",
+				Proxies: globalProxies,
+			},
+		}
+	} else {
+		// Direct-only mode: no nodes, no upstream — all traffic goes DIRECT.
+		mihomoConfig.ProxyGroups = []ProxyGroup{
+			{
+				Name:    "Proxy",
+				Type:    "select",
+				Proxies: []string{"DIRECT", "REJECT"},
+			},
+			{
+				Name:    "GLOBAL",
+				Type:    "select",
+				Proxies: []string{"DIRECT", "Proxy", "REJECT"},
+			},
+		}
 	}
 
 	return mihomoConfig, nil
@@ -222,15 +250,17 @@ func effectiveProxyName(slotID int, selectedNode *subscription.Node, cfg *config
 	return ""
 }
 
-func buildUpstreamProxy(slotID int, selectedNode subscription.Node, upstream config.UpstreamProxyConfig) (map[string]any, string) {
+func buildUpstreamProxy(slotID int, selectedNode *subscription.Node, upstream config.UpstreamProxyConfig) (map[string]any, string) {
 	name := slotUpstreamProxyName(slotID)
 	proxyType := upstream.Protocol
 	proxy := map[string]any{
-		"name":         name,
-		"type":         proxyType,
-		"server":       upstream.Server,
-		"port":         upstream.Port,
-		"dialer-proxy": selectedNode.Name,
+		"name":   name,
+		"type":   proxyType,
+		"server": upstream.Server,
+		"port":   upstream.Port,
+	}
+	if selectedNode != nil && strings.TrimSpace(selectedNode.Name) != "" {
+		proxy["dialer-proxy"] = selectedNode.Name
 	}
 
 	if upstream.Protocol == "https" {

@@ -65,6 +65,7 @@ settings:
   concurrent: "并发测试数"
   timeout: "测试超时"
   server_display: "服务器地址:端口"
+  speed_unit: "速度显示单位"
   restart_core: "重启内核"
   on: "开"
   off: "关"
@@ -73,6 +74,7 @@ settings:
 
 slots:
   title: "槽位"
+  description: "每个槽位是一个独立的代理实例，拥有独立的端口、模式和节点。本软件以槽位为核心驱动。"
   no_proxy: "未设置"
   no_upstream: "直连"
   power: "开关"
@@ -98,6 +100,7 @@ slots:
   restarting: "Slot %d 已保存，正在重启..."
   proxy_picker_hint: "使用 ←/→ 切换订阅，回车选择节点。"
   upstream_picker_hint: "选择一个上游代理，或保持为空。"
+  main_slot_suffix: "主"
 
 logs:
   clear: "清空"

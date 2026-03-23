@@ -55,8 +55,6 @@ type NodesTab struct {
 	// Detail view
 	showDetail bool
 	detailView *NodeDetailView
-	// firstLoad triggers an automatic latency test on the first node refresh.
-	firstLoad bool
 }
 
 // NewNodesTab creates a new nodes tab
@@ -68,7 +66,6 @@ func NewNodesTab(nodeMgr *node.Manager) *NodesTab {
 		scrollStates:   make(map[string]scrollState),
 		slotIndicators: make(map[string]SlotIndicator),
 		slotTraffic:    make(map[string]string),
-		firstLoad:      true,
 	}
 }
 
@@ -122,10 +119,6 @@ func (t *NodesTab) Update(msg tea.Msg) (*NodesTab, tea.Cmd) {
 		t.nodes = msg.Nodes
 		t.updateTableRows()
 		t.applyPreselect()
-		if t.firstLoad && len(msg.Nodes) > 0 {
-			t.firstLoad = false
-			return t, t.testAllNodes()
-		}
 	}
 
 	return t, nil
@@ -163,7 +156,7 @@ func (t *NodesTab) View() string {
 
 	// Help
 	help := styles.HelpKey.Render("↑/↓") + styles.HelpText.Render(" navigate  ") +
-		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" slot0  ") +
+		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" rule/global/off  ") +
 		styles.HelpKey.Render("D") + styles.HelpText.Render(" disconnect all  ") +
 		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
 		styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh  ") +
@@ -189,13 +182,12 @@ func (t *NodesTab) SetSize(width, height int) {
 	// - table separator: 1 line
 	// - help text (rendered after table): 1 line
 	// - scroll indicator (when scrolling, added by table.View): 1 line
-	// - extra line for tab bar BorderBottom (not fully covered by contentHeight): 1 line
-	// Total: 7 lines reserved
+	// Total: 6 lines reserved
 	//
 	// Note: We always reserve the scroll indicator line for consistency,
 	// even though it's only shown when len(rows) > table height.
 	// This prevents overflow when switching to large subscriptions.
-	const reservedLines = 7
+	const reservedLines = 6
 
 	rowsHeight := height - reservedLines
 	if rowsHeight < 1 {
@@ -320,7 +312,7 @@ func (t *NodesTab) updateTableRows() {
 
 		icon := ""
 		if ind, ok := t.slotIndicators[n.Name]; ok {
-			icon = fmt.Sprintf("%s%d", ind.Icon, ind.SlotID)
+			icon = ind.Icon
 		}
 
 		latency := "-"
@@ -388,6 +380,11 @@ func (t *NodesTab) SetPreselect(node *subscription.Node) {
 	t.preselectName = node.Name
 	t.preselectServer = node.Server
 	t.preselectPort = node.Port
+	t.applyPreselect()
+}
+
+// RestoreCursor re-applies the preselect so the cursor stays on the intended node.
+func (t *NodesTab) RestoreCursor() {
 	t.applyPreselect()
 }
 

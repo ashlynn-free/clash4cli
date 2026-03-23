@@ -1,16 +1,17 @@
 package tabs
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/node"
@@ -58,6 +59,13 @@ const (
 	cardFocusItemCount
 )
 
+// SlotTrafficInfo holds computed per-slot traffic data for display.
+type SlotTrafficInfo struct {
+	UpRate    int64
+	DownRate  int64
+	ConnCount int
+}
+
 // SlotsTab renders the top-level slot workspace.
 type SlotsTab struct {
 	cfg        *config.Config
@@ -83,6 +91,10 @@ type SlotsTab struct {
 	manualPortSelected bool
 	message            string
 	messageType        string
+	slotRegions        [proxy.MaxSlots]string
+	slotLatencies      [proxy.MaxSlots]int64
+	slotTraffic        [proxy.MaxSlots]*SlotTrafficInfo
+	lastTestTime       time.Time
 }
 
 // NewSlotsTab creates the slots tab.
@@ -109,8 +121,13 @@ func (t *SlotsTab) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// SlotTestDoneMsg signals that a slot node latency test has completed.
-type SlotTestDoneMsg struct{ SlotID int }
+// SlotTestResultMsg reports the combined latency + region result for a slot test.
+type SlotTestResultMsg struct {
+	SlotID  int
+	Latency int64
+	Region  string
+	Err     error
+}
 
 // BlocksGlobalKeys reports whether a modal sub-view is active.
 func (t *SlotsTab) BlocksGlobalKeys() bool {
@@ -129,6 +146,20 @@ func (t *SlotsTab) SetSize(width, height int) {
 	t.refreshTables()
 }
 
+// SetSlotTraffic updates the live traffic info for a slot.
+func (t *SlotsTab) SetSlotTraffic(slotID int, info *SlotTrafficInfo) {
+	if slotID >= 0 && slotID < proxy.MaxSlots {
+		t.slotTraffic[slotID] = info
+	}
+}
+
+// ClearSlotTraffic removes traffic info for a slot.
+func (t *SlotsTab) ClearSlotTraffic(slotID int) {
+	if slotID >= 0 && slotID < proxy.MaxSlots {
+		t.slotTraffic[slotID] = nil
+	}
+}
+
 // Update handles slot UI input.
 func (t *SlotsTab) Update(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -139,8 +170,15 @@ func (t *SlotsTab) Update(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 			t.message = ""
 		}
 		return t, nil
-	case SlotTestDoneMsg:
-		return t, nil // nodeMgr already cached the result; redraw picks it up
+	case SlotTestResultMsg:
+		if msg.SlotID >= 0 && msg.SlotID < proxy.MaxSlots && msg.Err == nil {
+			t.slotRegions[msg.SlotID] = msg.Region
+			t.slotLatencies[msg.SlotID] = msg.Latency
+			t.cfg.SetSlotLastLatency(msg.SlotID, msg.Latency)
+			t.cfg.SetSlotLastRegion(msg.SlotID, msg.Region)
+			_ = t.cfg.Save()
+		}
+		return t, nil
 	}
 
 	switch t.view {
@@ -164,10 +202,14 @@ func (t *SlotsTab) updateList(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 			if t.slotListIndex > 0 {
 				t.slotListIndex--
+			} else {
+				t.slotListIndex = proxy.MaxSlots - 1
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
 			if t.slotListIndex < proxy.MaxSlots-1 {
 				t.slotListIndex++
+			} else {
+				t.slotListIndex = 0
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			if t.detailCursor > cardFocusPort {
@@ -202,7 +244,11 @@ func (t *SlotsTab) updateList(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 				t.view = slotsViewUpstreamPicker
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
-			return t, t.testSelectedSlotNode()
+			if time.Since(t.lastTestTime) < 2*time.Second {
+				return t, nil
+			}
+			t.lastTestTime = time.Now()
+			return t, t.testAllSlotNodes()
 		case key.Matches(msg, key.NewBinding(key.WithKeys(" "))):
 			return t, func() tea.Msg {
 				return SlotToggleRequestMsg{SlotID: t.selectedSlotID()}
@@ -359,7 +405,11 @@ func (t *SlotsTab) viewList() string {
 		title = "Slots"
 	}
 	lines := []string{styles.Title.Render(title)}
-	lines = append(lines, styles.HelpText.Render("Enter to configure, t to power on/off."))
+	desc := i18n.M().Slots.Description
+	if desc == "" {
+		desc = "Each Slot is an independent proxy instance with its own port, mode, and node. This software is Slot-driven."
+	}
+	lines = append(lines, styles.HelpText.Render(desc))
 	lines = append(lines, "")
 
 	// Calculate exact height budget for card area.
@@ -383,7 +433,7 @@ func (t *SlotsTab) viewList() string {
 	help := styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" switch  ") +
 		styles.HelpKey.Render("←→") + styles.HelpText.Render(" focus  ") +
 		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" edit  ") +
-		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
+		styles.HelpKey.Render("t") + styles.HelpText.Render(" test all  ") +
 		styles.HelpKey.Render("Space") + styles.HelpText.Render(" on/off")
 	lines = append(lines, "", help)
 	return styles.ContentArea.Render(strings.Join(lines, "\n"))
@@ -475,10 +525,21 @@ func (t *SlotsTab) refreshProxyRows() {
 		rows = append(rows, []string{
 			indicator,
 			n.Name,
+			fmt.Sprintf("%s://%s:%d", n.Type, n.Server, n.Port),
 		})
 	}
 	t.proxyList.SetColumns(proxyTableColumns(t.width))
-	height := t.height - 8
+	// Reserve lines for viewProxyPicker non-table elements:
+	// title(1) + hint(1) + empty(1) + table header(1) + separator(1)
+	// + scroll indicator(1) + empty(1) + help(1) = 8
+	reserved := 8
+	if len(t.sortedSubscriptions()) > 0 {
+		reserved += 2 // sub-tabs line + TabBar border
+	}
+	if t.message != "" {
+		reserved += 2 // empty line + message
+	}
+	height := t.height - reserved
 	if height < 3 {
 		height = 3
 	}
@@ -551,44 +612,33 @@ func (t *SlotsTab) prepareManualPortInput() {
 	t.manualPortInput.SetCursor(len(t.manualPortInput.Value()))
 }
 
-func (t *SlotsTab) testSelectedSlotNode() tea.Cmd {
-	slotID := t.selectedSlotID()
-	ref, ok := t.cfg.GetSlotNodeRef(slotID)
-	if !ok || t.nodeMgr == nil || t.subManager == nil {
-		return nil
-	}
-	// Find the subscription.Node matching the slot's ref
-	nodes := t.subManager.GetNodesForSubscription(ref.SubID)
-	var target *subscription.Node
-	for i := range nodes {
-		if slotNodeMatchesRef(ref, &nodes[i]) {
-			target = &nodes[i]
-			break
-		}
-	}
-	if target == nil {
-		return nil
-	}
-	nodeCopy := *target
-	return func() tea.Msg {
-		t.nodeMgr.TestNode(context.Background(), &nodeCopy)
-		return SlotTestDoneMsg{SlotID: slotID}
-	}
-}
 
-// findSlotNode looks up the subscription.Node bound to a slot.
-func (t *SlotsTab) findSlotNode(slotID int) *subscription.Node {
-	ref, ok := t.cfg.GetSlotNodeRef(slotID)
-	if !ok || t.subManager == nil {
+func (t *SlotsTab) testAllSlotNodes() tea.Cmd {
+	var cmds []tea.Cmd
+	for slotID := 0; slotID < proxy.MaxSlots; slotID++ {
+		running := t.slotMgr != nil && t.slotMgr.GetSlotState(slotID) != nil
+		ready, _ := t.slotReady(slotID)
+		if !running && !ready {
+			continue
+		}
+		sid := slotID
+		cfg := t.cfg
+		subMgr := t.subManager
+		slotMgr := t.slotMgr
+		cmds = append(cmds, func() tea.Msg {
+			result := proxy.SlotTest(cfg, subMgr, slotMgr, sid, 5*time.Second)
+			return SlotTestResultMsg{
+				SlotID:  sid,
+				Latency: result.Latency,
+				Region:  result.Region,
+				Err:     result.Err,
+			}
+		})
+	}
+	if len(cmds) == 0 {
 		return nil
 	}
-	nodes := t.subManager.GetNodesForSubscription(ref.SubID)
-	for i := range nodes {
-		if slotNodeMatchesRef(ref, &nodes[i]) {
-			return &nodes[i]
-		}
-	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 func (t *SlotsTab) saveAndMaybeRestart(slotID int) tea.Cmd {
@@ -597,12 +647,10 @@ func (t *SlotsTab) saveAndMaybeRestart(slotID int) tea.Cmd {
 		return nil
 	}
 	if t.slotMgr != nil && t.slotMgr.GetSlotState(slotID) != nil {
-		t.setMessage(formatSlotMessage(i18n.M().Slots.Restarting, slotID, fmt.Sprintf("Slot %d saved. Restarting...", slotID)), "success")
 		return func() tea.Msg {
 			return SlotRestartRequestMsg{SlotID: slotID}
 		}
 	}
-	t.setMessage(formatSlotMessage(i18n.M().Slots.Saved, slotID, fmt.Sprintf("Slot %d saved.", slotID)), "success")
 	return nil
 }
 
@@ -768,24 +816,6 @@ func (t *SlotsTab) slotUpstreamSummary(slotID int) string {
 }
 
 func (t *SlotsTab) slotReady(slotID int) (bool, string) {
-	ref, ok := t.cfg.GetSlotNodeRef(slotID)
-	if !ok || strings.TrimSpace(ref.SubID) == "" {
-		return false, slotLabel(i18n.M().Slots.MissingProxy, "Missing proxy")
-	}
-	if t.subManager == nil {
-		return false, slotLabel(i18n.M().Slots.MissingProxy, "Missing proxy")
-	}
-	nodes := t.subManager.GetNodesForSubscription(ref.SubID)
-	found := false
-	for i := range nodes {
-		if slotNodeMatchesRef(ref, &nodes[i]) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return false, slotLabel(i18n.M().Slots.MissingProxy, "Missing proxy")
-	}
 	if _, _, ok := t.cfg.SlotMixedPort(slotID); !ok {
 		return false, slotLabel(i18n.M().Slots.InvalidPort, "Invalid port")
 	}
@@ -846,16 +876,18 @@ func formatSlotMessage(format string, slotID int, fallback string) string {
 }
 
 func proxyTableColumns(width int) []components.Column {
-	if width < 40 {
-		width = 40
+	if width < 60 {
+		width = 60
 	}
-	nameW := width - 4
+	detailW := 28
+	nameW := width - 4 - detailW
 	if nameW < 16 {
 		nameW = 16
 	}
 	return []components.Column{
 		{Title: "", Width: 4},
 		{Title: "Name", Width: nameW},
+		{Title: "Detail", Width: detailW},
 	}
 }
 
@@ -898,14 +930,7 @@ func (t *SlotsTab) moveSlotSelection(dx, dy int) {
 }
 
 func (t *SlotsTab) slotGridColumns() int {
-	switch {
-	case t.width >= 186:
-		return 3
-	case t.width >= 112:
-		return 2
-	default:
-		return 1
-	}
+	return 1
 }
 
 func (t *SlotsTab) renderSlotCardRows() ([]string, int) {
@@ -914,9 +939,8 @@ func (t *SlotsTab) renderSlotCardRows() ([]string, int) {
 		cols = 1
 	}
 
-	const indicatorWidth = 2 // "▶ " or "  "
 	gap := 2
-	availableWidth := t.width - cols*indicatorWidth - (cols-1)*gap
+	availableWidth := t.width - (cols-1)*gap
 	if availableWidth < cols*36 {
 		availableWidth = cols * 36
 	}
@@ -925,20 +949,10 @@ func (t *SlotsTab) renderSlotCardRows() ([]string, int) {
 		cardWidth = 36
 	}
 
-	type cardWithIndicator struct {
-		indicator string
-		card      string
-	}
-	items := make([]cardWithIndicator, 0, proxy.MaxSlots)
+	items := make([]string, 0, proxy.MaxSlots)
 	for slotID := 0; slotID < proxy.MaxSlots; slotID++ {
-		ind := "  "
-		if slotID == t.selectedSlotID() {
-			ind = styles.Primary.Render("▶ ")
-		}
-		items = append(items, cardWithIndicator{
-			indicator: ind,
-			card:      t.renderSlotCard(slotID, cardWidth),
-		})
+		selected := slotID == t.selectedSlotID()
+		items = append(items, t.renderSlotCard(slotID, cardWidth, selected))
 	}
 
 	rows := make([]string, 0, (len(items)+cols-1)/cols)
@@ -949,14 +963,11 @@ func (t *SlotsTab) renderSlotCardRows() ([]string, int) {
 		}
 		var rowParts []string
 		for j := i; j < end; j++ {
-			// Vertically center the indicator with the card (pad top line for border)
-			indBlock := lipgloss.NewStyle().Width(indicatorWidth).Height(4).PaddingTop(1).Render(items[j].indicator)
-			rowParts = append(rowParts, indBlock, items[j].card)
+			rowParts = append(rowParts, items[j])
 		}
 		// Fill remaining columns with blanks
-		for len(rowParts) < cols*2 {
+		for len(rowParts) < cols {
 			rowParts = append(rowParts,
-				lipgloss.NewStyle().Width(indicatorWidth).Render(""),
 				lipgloss.NewStyle().Width(cardWidth).Render(""))
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, rowParts...))
@@ -969,8 +980,7 @@ func (t *SlotsTab) renderSlotCardRows() ([]string, int) {
 	return rows, rowHeight
 }
 
-func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int) string {
-	isSelected := slotID == t.selectedSlotID()
+func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int, selected bool) string {
 	running := t.slotMgr != nil && t.slotMgr.GetSlotState(slotID) != nil
 	ready, _ := t.slotReady(slotID)
 	inFocus := slotID == t.selectedSlotID()
@@ -986,14 +996,55 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int) string {
 		statusStyle = styles.StatusError
 	}
 
-	innerWidth := cardWidth - 4 // minus border + padding
+	const indicatorPad = 3 // "▶  " or "   " — 3 chars
+	indicator := "   "
+	if selected {
+		indicator = styles.Primary.Render("▶") + "  "
+	}
+	indentPad := strings.Repeat(" ", indicatorPad)
+
+	innerWidth := cardWidth - 4 - indicatorPad // border(2) + padding(2) + indicator(3)
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
 
-	// Line 1 (header): Slot N              ● STATUS
-	titleLeft := styles.Title.UnsetPadding().Render(fmt.Sprintf("Slot %d", slotID))
-	titleRight := statusStyle.Render(strings.ToUpper(statusLabel))
+	// Line 1 (header): Slot N  [traffic info]  STATUS
+	slotTitle := fmt.Sprintf("Slot %d", slotID)
+	if slotID == 0 {
+		slotTitle += " (" + slotLabel(i18n.M().Slots.MainSlotSuffix, "Main") + ")"
+	}
+	titleLeft := styles.Title.UnsetPadding().Render(slotTitle)
+	statusText := statusStyle.Render(strings.ToUpper(statusLabel))
+
+	// Build traffic info for running slots
+	var trafficStr string
+	if running {
+		if info := t.slotTraffic[slotID]; info != nil {
+			unit := ""
+			if t.cfg != nil {
+				unit = t.cfg.UI.SpeedUnit
+			}
+			trafficStr = fmt.Sprintf("↑%s ↓%s ⇌%d",
+				components.FormatRateWithUnit(info.UpRate, unit),
+				components.FormatRateWithUnit(info.DownRate, unit),
+				info.ConnCount,
+			)
+		}
+	}
+
+	var titleRight string
+	if trafficStr != "" {
+		rendered := styles.Muted.Render(trafficStr)
+		// Only show traffic if there's enough room
+		if lipgloss.Width(rendered)+lipgloss.Width(statusText)+8 <= innerWidth {
+			titleRight = rendered + " " + statusText
+		} else {
+			titleRight = statusText
+		}
+	} else {
+		titleRight = statusText
+	}
+
 	leftWidth := innerWidth - lipgloss.Width(titleRight)
 	if leftWidth < 6 {
 		leftWidth = 6
@@ -1003,14 +1054,53 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int) string {
 		titleRight,
 	)
 
-	// Line 2 (flow): :PORT ─▸ Rule ─▸ ProxyNode ─▸ Upstream
+	// Line 2: flow chain on the left, region + latency on the right
+	// Build right-side info: "region latency"
+	regionText := t.slotRegions[slotID]
+	if regionText == "" {
+		regionText = t.cfg.GetSlotLastRegion(slotID)
+	}
+	latencyText := t.slotLatencyText(slotID)
+	var rightInfo string
+	switch {
+	case regionText != "" && latencyText != "":
+		rightInfo = styles.Muted.Render(regionText) + " " + latencyText
+	case latencyText != "":
+		rightInfo = latencyText
+	case regionText != "":
+		rightInfo = styles.Muted.Render(regionText)
+	}
+	rightWidth := lipgloss.Width(rightInfo)
+
+	// Flow line gets the remaining width
+	flowWidth := innerWidth
+	if rightWidth > 0 {
+		flowWidth = innerWidth - rightWidth - 2 // 2 for gap
+	}
+	if flowWidth < 20 {
+		flowWidth = 20
+	}
+
 	port := t.slotPortSummaryShort(slotID)
 	mode := slotModeTitle(t.cfg.GetSlotStartMode(slotID))
 	proxyName := t.slotProxySummaryShort(slotID)
 	upstream := t.slotUpstreamSummary(slotID)
-	flowLine := t.renderFlowLine(port, mode, proxyName, upstream, innerWidth, inFocus)
+	flowLine := t.renderFlowLine(port, mode, proxyName, upstream, flowWidth, inFocus)
 
-	cardBody := lipgloss.JoinVertical(lipgloss.Left, header, flowLine)
+	var infoLine string
+	if rightWidth > 0 {
+		// Truncate by display width first so lipgloss Width() only pads, never wraps.
+		clipped := ansi.Truncate(flowLine, innerWidth-rightWidth, "")
+		flowPart := lipgloss.NewStyle().Width(innerWidth - rightWidth).Render(clipped)
+		infoLine = flowPart + rightInfo
+	} else {
+		infoLine = ansi.Truncate(flowLine, innerWidth, "")
+	}
+
+	cardBody := lipgloss.JoinVertical(lipgloss.Left,
+		indicator+header,
+		indentPad+infoLine,
+	)
 
 	cardStyle := lipgloss.NewStyle().
 		Width(cardWidth).
@@ -1019,14 +1109,19 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int) string {
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(styles.MutedColor)
 
-	_ = isSelected // selection indicated by ▶ prefix
-	if running {
-		cardStyle = cardStyle.Background(lipgloss.Color("#24343A"))
-	} else if ready {
-		cardStyle = cardStyle.Background(lipgloss.Color("#302A18"))
-	}
-
 	return cardStyle.Render(cardBody)
+}
+
+func (t *SlotsTab) slotLatencyText(slotID int) string {
+	// Use in-memory result from SlotTest
+	if slotID >= 0 && slotID < proxy.MaxSlots && t.slotLatencies[slotID] != 0 {
+		return styles.FormatLatency(t.slotLatencies[slotID])
+	}
+	// Fallback to persisted cache
+	if cached := t.cfg.GetSlotLastLatency(slotID); cached != 0 {
+		return styles.FormatLatency(cached)
+	}
+	return ""
 }
 
 func (t *SlotsTab) slotProxySummaryShort(slotID int) string {
@@ -1056,11 +1151,29 @@ func (t *SlotsTab) renderFlowLine(port, mode, proxyName, upstream string, width 
 	arrowWidth := 4 // " ─▸ " is 4 chars
 	numArrows := 3  // port ─▸ mode ─▸ proxy ─▸ upstream
 
-	// Calculate available width for proxy name (the flexible part)
-	fixedWidth := len([]rune(port)) + len([]rune(mode)) + arrowWidth*numArrows + len([]rune(upstream))
+	const minProxyRW = 4
+	portRW := len([]rune(port))
+	modeRW := len([]rune(mode))
+
+	// baseFixed: space used by port + mode + all arrows + minimum proxy, without upstream
+	baseFixed := portRW + modeRW + arrowWidth*numArrows + minProxyRW
+
+	// Clip upstream if the total exceeds width
+	clippedUpstream := upstream
+	if baseFixed+len([]rune(upstream)) > width {
+		budget := width - baseFixed
+		if budget <= 0 {
+			clippedUpstream = ""
+		} else {
+			clippedUpstream = clipText(upstream, budget)
+		}
+	}
+
+	// Recalculate proxy max width with the (possibly clipped) upstream
+	fixedWidth := portRW + modeRW + arrowWidth*numArrows + len([]rune(clippedUpstream))
 	proxyMaxWidth := width - fixedWidth
-	if proxyMaxWidth < 4 {
-		proxyMaxWidth = 4
+	if proxyMaxWidth < minProxyRW {
+		proxyMaxWidth = minProxyRW
 	}
 	clippedProxy := clipText(proxyName, proxyMaxWidth)
 
@@ -1077,9 +1190,12 @@ func (t *SlotsTab) renderFlowLine(port, mode, proxyName, upstream string, width 
 		modeText = styles.Accent.Render(mode)
 	}
 	proxyText := highlight(clippedProxy, cardFocusProxy)
-	upstreamText := highlight(upstream, cardFocusUpstream)
 
-	return portText + arrow + modeText + arrow + proxyText + arrow + upstreamText
+	if clippedUpstream == "" {
+		return ansi.Truncate(portText+arrow+modeText+arrow+proxyText, width, "")
+	}
+	upstreamText := highlight(clippedUpstream, cardFocusUpstream)
+	return ansi.Truncate(portText+arrow+modeText+arrow+proxyText+arrow+upstreamText, width, "")
 }
 
 func clipText(value string, width int) string {

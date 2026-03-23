@@ -63,6 +63,7 @@ settings:
   concurrent: "Параллельные тесты"
   timeout: "Тайм-аут теста"
   server_display: "Колонка Server (Host:Port)"
+  speed_unit: "Единица скорости"
   restart_core: "Перезапустить ядро"
   on: "Вкл"
   off: "Выкл"

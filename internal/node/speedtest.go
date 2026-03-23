@@ -173,7 +173,7 @@ func (st *SpeedTester) testLatencyViaMihomoAPI(ctx context.Context, node *subscr
 		req.Header.Set("Authorization", "Bearer "+apiSecret)
 	}
 
-	client := &http.Client{Timeout: st.timeout + time.Second}
+	client := &http.Client{Timeout: st.timeout + time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 	resp, err := client.Do(req)
 	if err != nil {
 		return -1, err

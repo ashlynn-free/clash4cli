@@ -63,6 +63,7 @@ settings:
   concurrent: "동시 테스트"
   timeout: "테스트 시간 제한"
   server_display: "Server 열 (Host:Port)"
+  speed_unit: "속도 표시 단위"
   restart_core: "코어 재시작"
   on: "켜짐"
   off: "꺼짐"

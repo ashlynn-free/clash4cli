@@ -247,7 +247,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Config saved to: %s", configPath)}
 
 	// Find mihomo binary
-	mihomoPath, err := findMihomoBinary()
+	mihomoPath, err := findMihomoBinaryFunc()
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("mihomo binary not found: %v", err)
@@ -274,43 +274,16 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	}
 	c.logPath = logPath
 
-	// Start mihomo process in detached mode so closing c4c won't stop it.
-	cmd := exec.Command(mihomoPath, "-d", workDir, "-f", c.configPath)
-	cmd.Dir = workDir
-	configureDetachedCommand(cmd)
-
-	// Redirect stdio to files (no pipes) so the child won't die on SIGPIPE when
-	// the UI exits.
-	devNull, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
-	if err != nil {
-		c.status = StatusError
-		return fmt.Errorf("failed to open %s: %w", os.DevNull, err)
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		_ = devNull.Close()
-		c.status = StatusError
-		return fmt.Errorf("failed to open mihomo log file: %w", err)
-	}
-	cmd.Stdin = devNull
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
 	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Executing (detached): %s -d %s -f %s", mihomoPath, workDir, c.configPath)}
 
-	if err := cmd.Start(); err != nil {
-		_ = devNull.Close()
-		_ = logFile.Close()
+	cmd, err := startMihomoProcess(mihomoPath, workDir, c.configPath, logPath)
+	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to start mihomo: %v", err)
 		c.logCh <- LogEntry{Level: "error", Message: errMsg}
 		logger.Error("%s", errMsg)
-		return fmt.Errorf("failed to start mihomo: %w", err)
+		return err
 	}
-
-	// Close parent copies of file descriptors; the child keeps its own.
-	_ = devNull.Close()
-	_ = logFile.Close()
 
 	c.cmd = cmd
 	c.pid = cmd.Process.Pid
@@ -587,8 +560,8 @@ func (c *Controller) readLogs(pipe io.ReadCloser, source string) {
 	}
 }
 
-// findMihomoBinary finds the mihomo binary
-func findMihomoBinary() (string, error) {
+// findMihomoBinaryDefault finds the mihomo binary
+func findMihomoBinaryDefault() (string, error) {
 	// Check in PATH first
 	path, err := exec.LookPath("mihomo")
 	if err == nil {
@@ -816,8 +789,9 @@ func (c *Controller) SetMode(mode string) error {
 }
 
 type connectionsResponse struct {
-	DownloadTotal int64 `json:"downloadTotal"`
-	UploadTotal   int64 `json:"uploadTotal"`
+	DownloadTotal int64             `json:"downloadTotal"`
+	UploadTotal   int64             `json:"uploadTotal"`
+	Connections   []json.RawMessage `json:"connections"`
 }
 
 type versionResponse struct {
@@ -838,10 +812,16 @@ func (c *Controller) doAPI(req *http.Request) (*http.Response, error) {
 
 // GetTrafficTotals returns the total uploaded/downloaded bytes reported by the core.
 func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64, err error) {
+	up, down, _, err := c.GetTrafficAndConnCount()
+	return up, down, err
+}
+
+// GetTrafficAndConnCount returns traffic totals and active connection count.
+func (c *Controller) GetTrafficAndConnCount() (uploadTotal int64, downloadTotal int64, connCount int, err error) {
 	c.mu.RLock()
 	if c.status != StatusRunning {
 		c.mu.RUnlock()
-		return 0, 0, fmt.Errorf("proxy is not running")
+		return 0, 0, 0, fmt.Errorf("proxy is not running")
 	}
 
 	apiHost := c.apiHost
@@ -858,7 +838,7 @@ func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64,
 	apiURL := fmt.Sprintf("http://%s:%d/connections", apiHost, apiPort)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to create request: %w", err)
+		return 0, 0, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
@@ -866,7 +846,7 @@ func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64,
 
 	resp, err := c.doAPI(req)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to call API: %w", err)
+		return 0, 0, 0, fmt.Errorf("failed to call API: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -874,16 +854,16 @@ func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64,
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		msg := strings.TrimSpace(string(body))
 		if msg != "" {
-			return 0, 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, msg)
+			return 0, 0, 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, msg)
 		}
-		return 0, 0, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return 0, 0, 0, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var out connectionsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, 0, fmt.Errorf("failed to decode response: %w", err)
+		return 0, 0, 0, fmt.Errorf("failed to decode response: %w", err)
 	}
-	return out.UploadTotal, out.DownloadTotal, nil
+	return out.UploadTotal, out.DownloadTotal, len(out.Connections), nil
 }
 
 // GetCoreVersion returns the mihomo core version string.

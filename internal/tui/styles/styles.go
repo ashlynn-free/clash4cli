@@ -1,6 +1,8 @@
 package styles
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -167,15 +169,13 @@ func FormatLatency(ms int64) string {
 
 	text := lipgloss.NewStyle()
 	switch {
-	case ms < 100:
+	case ms < 2000:
 		text = LatencyGood
-	case ms < 300:
+	case ms < 3000:
 		text = LatencyMedium
 	default:
 		text = LatencyBad
 	}
 
-	return text.Render(lipgloss.NewStyle().Width(8).Render(
-		lipgloss.NewStyle().Render(string(rune(ms)) + "ms"),
-	))
+	return text.Render(fmt.Sprintf("%dms", ms))
 }

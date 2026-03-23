@@ -63,6 +63,7 @@ settings:
   concurrent: "Uji simultan"
   timeout: "Batas waktu uji"
   server_display: "Kolom Server (Host:Port)"
+  speed_unit: "Unit kecepatan"
   restart_core: "Restart core"
   on: "Aktif"
   off: "Nonaktif"

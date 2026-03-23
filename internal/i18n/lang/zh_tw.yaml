@@ -64,6 +64,7 @@ settings:
   concurrent: "並發測試數"
   timeout: "測試逾時"
   server_display: "伺服器位址:埠"
+  speed_unit: "速度顯示單位"
   restart_core: "重新啟動內核"
   on: "開"
   off: "關"

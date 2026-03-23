@@ -63,6 +63,7 @@ settings:
   concurrent: "Gleichzeitige Tests"
   timeout: "Test-Timeout"
   server_display: "Server-Spalte (Host:Port)"
+  speed_unit: "Geschwindigkeitseinheit"
   restart_core: "Core neu starten"
   on: "An"
   off: "Aus"

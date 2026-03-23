@@ -63,6 +63,7 @@ settings:
   concurrent: "Pruebas simultáneas"
   timeout: "Tiempo de espera"
   server_display: "Columna Server (Host:Port)"
+  speed_unit: "Unidad de velocidad"
   restart_core: "Reiniciar núcleo"
   on: "Activado"
   off: "Desactivado"

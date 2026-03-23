@@ -74,10 +74,6 @@ func (sm *SlotManager) StartSlotWithMode(slotID int, subID string, nodes []subsc
 	if slotID < 0 || slotID >= MaxSlots {
 		return fmt.Errorf("invalid slot ID: %d", slotID)
 	}
-	if selected == nil {
-		return fmt.Errorf("no node selected")
-	}
-
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -101,7 +97,11 @@ func (sm *SlotManager) StartSlotWithMode(slotID int, subID string, nodes []subsc
 
 	sm.slots[slotID] = sc
 	sm.slotModes[slotID] = initialMode
-	sm.slotNodes[slotID] = selected.Name
+	nodeName := ""
+	if selected != nil {
+		nodeName = selected.Name
+	}
+	sm.slotNodes[slotID] = nodeName
 	sm.slotSubIDs[slotID] = subID
 
 	// Update lock file
@@ -283,6 +283,23 @@ func (sm *SlotManager) GetTrafficForSlot(slotID int) (int64, int64, error) {
 	}
 
 	return sc.GetTrafficTotals()
+}
+
+// GetTrafficAndConnCountForSlot returns traffic totals and connection count for a slot.
+func (sm *SlotManager) GetTrafficAndConnCountForSlot(slotID int) (int64, int64, int, error) {
+	if slotID < 0 || slotID >= MaxSlots {
+		return 0, 0, 0, fmt.Errorf("invalid slot ID: %d", slotID)
+	}
+
+	sm.mu.RLock()
+	sc := sm.slots[slotID]
+	sm.mu.RUnlock()
+
+	if sc == nil {
+		return 0, 0, 0, fmt.Errorf("slot %d is not running", slotID)
+	}
+
+	return sc.GetTrafficAndConnCount()
 }
 
 // GetCoreVersion returns the mihomo core version for a slot.

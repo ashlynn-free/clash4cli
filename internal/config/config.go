@@ -71,6 +71,8 @@ type SlotConfig struct {
 	ManualMixedPort int                 `yaml:"manual_mixed_port,omitempty"`
 	UpstreamID      string              `yaml:"upstream_id,omitempty"`
 	Upstream        UpstreamProxyConfig `yaml:"upstream,omitempty"` // legacy; migrated to UpstreamID
+	LastLatency     int64               `yaml:"last_latency,omitempty"`
+	LastRegion      string              `yaml:"last_region,omitempty"`
 }
 
 // UpstreamProxyConfig describes an optional upstream HTTP/HTTPS/SOCKS5 proxy.
@@ -103,6 +105,8 @@ type UIConfig struct {
 	SelectedNodeType     string `yaml:"selected_node_type,omitempty"`
 	// SlotHistory saves the last connected slot states for UI display
 	SlotHistory []SlotHistoryEntry `yaml:"slot_history,omitempty"`
+	// SpeedUnit controls speed display: "bytes" (MB/s) or "bits" (Mbps).
+	SpeedUnit string `yaml:"speed_unit,omitempty"`
 }
 
 // SlotHistoryEntry records a slot's historical connection state

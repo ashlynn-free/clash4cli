@@ -55,7 +55,8 @@ func (s SlotConfig) hasPersistedSettings() bool {
 	hasMode := s.StartMode != ""
 	hasPort := s.PortMode == "manual" || s.ManualMixedPort > 0
 	hasUpstream := s.UpstreamID != "" || !s.Upstream.isEmpty()
-	return hasNode || hasMode || hasPort || hasUpstream
+	hasCachedTest := s.LastLatency != 0 || s.LastRegion != ""
+	return hasNode || hasMode || hasPort || hasUpstream || hasCachedTest
 }
 
 func normalizeSlotStartMode(mode string) string {
@@ -446,6 +447,52 @@ func (c *Config) migrateInlineUpstreams() {
 		}
 		slot.Upstream = UpstreamProxyConfig{}
 	}
+}
+
+// GetSlotLastLatency returns the cached latency for a slot (ms). 0 means no result.
+func (c *Config) GetSlotLastLatency(slotID int) int64 {
+	if c == nil {
+		return 0
+	}
+	if idx := c.slotIndex(slotID); idx >= 0 {
+		return c.Slots[idx].LastLatency
+	}
+	return 0
+}
+
+// SetSlotLastLatency sets the cached latency for a slot.
+func (c *Config) SetSlotLastLatency(slotID int, latency int64) {
+	if c == nil {
+		return
+	}
+	slot := c.ensureSlotConfig(slotID)
+	if slot == nil {
+		return
+	}
+	slot.LastLatency = latency
+}
+
+// GetSlotLastRegion returns the cached region for a slot.
+func (c *Config) GetSlotLastRegion(slotID int) string {
+	if c == nil {
+		return ""
+	}
+	if idx := c.slotIndex(slotID); idx >= 0 {
+		return c.Slots[idx].LastRegion
+	}
+	return ""
+}
+
+// SetSlotLastRegion sets the cached region for a slot.
+func (c *Config) SetSlotLastRegion(slotID int, region string) {
+	if c == nil {
+		return
+	}
+	slot := c.ensureSlotConfig(slotID)
+	if slot == nil {
+		return
+	}
+	slot.LastRegion = region
 }
 
 func (u UpstreamProxyConfig) normalized() UpstreamProxyConfig {

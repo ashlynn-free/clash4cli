@@ -65,6 +65,7 @@ settings:
   concurrent: "Concurrent Tests"
   timeout: "Test Timeout"
   server_display: "Server column (Host:Port)"
+  speed_unit: "Speed display unit"
   restart_core: "Restart core"
   on: "On"
   off: "Off"
@@ -73,6 +74,7 @@ settings:
 
 slots:
   title: "Slots"
+  description: "Each Slot is an independent proxy instance with its own port, mode, and node. This software is Slot-driven."
   no_proxy: "Not set"
   no_upstream: "Direct"
   power: "Power"
@@ -98,6 +100,7 @@ slots:
   restarting: "Slot %d saved. Restarting..."
   proxy_picker_hint: "Use ←/→ to switch subscriptions, Enter to select a node."
   upstream_picker_hint: "Choose an upstream proxy or None."
+  main_slot_suffix: "Main"
 
 logs:
   clear: "Clear"

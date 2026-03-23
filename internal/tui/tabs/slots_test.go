@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"rocket4cli/internal/config"
+	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 )
 
@@ -214,5 +215,75 @@ func TestSlotsTab_ModeDirectToggle(t *testing.T) {
 	tab, _ = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if mode := cfg.GetSlotStartMode(0); mode != "rule" {
 		t.Fatalf("expected rule after second toggle, got %s", mode)
+	}
+}
+
+func TestSlotsTab_RenderSlotCardShowsLatencyAfterTest(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.SetSlotLastLatency(0, 42)
+	cfg.SetSlotLastRegion(0, "US, Test City")
+
+	tab := NewSlotsTab(cfg, subscription.NewManager(), nil, nil)
+	tab.SetSize(120, 30)
+
+	card := tab.renderSlotCard(0, 60, true)
+	if !strings.Contains(card, "ms") {
+		t.Fatalf("expected slot card to show latency, got %q", card)
+	}
+	if !strings.Contains(card, "US, Test City") {
+		t.Fatalf("expected slot card to show region, got %q", card)
+	}
+}
+
+func TestSlotsTab_UpstreamOnlySlotShowsReady(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	upID := cfg.AddUpstreamProxy(config.UpstreamProxyEntry{
+		Label:    "Corp Proxy",
+		Protocol: "http",
+		Server:   "proxy.corp.com",
+		Port:     8080,
+	})
+	cfg.SetSlotUpstreamRef(0, upID)
+	// No node ref set — upstream-only
+
+	tab := NewSlotsTab(cfg, subscription.NewManager(), nil, nil)
+	tab.SetSize(120, 30)
+
+	ready, reason := tab.slotReady(0)
+	if !ready {
+		t.Fatalf("expected upstream-only slot to be ready, got reason: %s", reason)
+	}
+
+	card := tab.renderSlotCard(0, 60, true)
+	if strings.Contains(card, "MISSING PROXY") {
+		t.Fatalf("expected no 'MISSING PROXY' for upstream-only slot, got %q", card)
+	}
+}
+
+func TestSlotsTab_AllSlotsReadyByDefault(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	tab := NewSlotsTab(cfg, subscription.NewManager(), nil, nil)
+	tab.SetSize(120, 30)
+
+	for slotID := 0; slotID < proxy.MaxSlots; slotID++ {
+		ready, reason := tab.slotReady(slotID)
+		if !ready {
+			t.Errorf("slot %d: expected ready, got not ready (%s)", slotID, reason)
+		}
 	}
 }
