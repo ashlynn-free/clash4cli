@@ -26,6 +26,9 @@ type SlotToggleRequestMsg struct {
 	SlotID int
 }
 
+// SlotDisconnectAllMsg asks the model to stop all running slots.
+type SlotDisconnectAllMsg struct{}
+
 // SlotRestartRequestMsg asks the model to restart a running slot from its persisted config.
 type SlotRestartRequestMsg struct {
 	SlotID int
@@ -253,6 +256,10 @@ func (t *SlotsTab) updateList(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 			return t, func() tea.Msg {
 				return SlotToggleRequestMsg{SlotID: t.selectedSlotID()}
 			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
+			return t, func() tea.Msg {
+				return SlotDisconnectAllMsg{}
+			}
 		}
 	}
 	return t, nil
@@ -273,10 +280,17 @@ func (t *SlotsTab) updateProxyPicker(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
 			t.proxyList.MoveDown()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			nodes := t.nodesForProxyPicker()
 			idx := t.proxyList.Selected()
-			if idx >= 0 && idx < len(nodes) {
-				node := nodes[idx]
+			if idx == 0 {
+				// "No Proxy (DIRECT)" — clear the node ref
+				t.cfg.SetSlotNodeRef(t.activeSlot, config.SlotNodeRef{})
+				t.view = slotsViewList
+				return t, t.saveAndMaybeRestart(t.activeSlot)
+			}
+			nodes := t.nodesForProxyPicker()
+			nodeIdx := idx - 1 // offset by 1 for the "No Proxy" row
+			if nodeIdx >= 0 && nodeIdx < len(nodes) {
+				node := nodes[nodeIdx]
 				t.cfg.SetSlotNodeRef(t.activeSlot, config.SlotNodeRef{
 					SubID:      t.proxySubID,
 					NodeName:   node.Name,
@@ -434,7 +448,8 @@ func (t *SlotsTab) viewList() string {
 		styles.HelpKey.Render("←→") + styles.HelpText.Render(" focus  ") +
 		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" edit  ") +
 		styles.HelpKey.Render("t") + styles.HelpText.Render(" test all  ") +
-		styles.HelpKey.Render("Space") + styles.HelpText.Render(" on/off")
+		styles.HelpKey.Render("Space") + styles.HelpText.Render(" on/off  ") +
+		styles.HelpKey.Render("D") + styles.HelpText.Render(" disconnect all")
 	lines = append(lines, "", help)
 	return styles.ContentArea.Render(strings.Join(lines, "\n"))
 }
@@ -515,8 +530,17 @@ func (t *SlotsTab) refreshTables() {
 
 func (t *SlotsTab) refreshProxyRows() {
 	nodes := t.nodesForProxyPicker()
-	rows := make([][]string, 0, len(nodes))
-	ref, _ := t.cfg.GetSlotNodeRef(t.activeSlot)
+	rows := make([][]string, 0, len(nodes)+1)
+	ref, hasRef := t.cfg.GetSlotNodeRef(t.activeSlot)
+
+	// "No Proxy (DIRECT)" option at the top
+	noProxyIndicator := ""
+	if !hasRef {
+		noProxyIndicator = "●"
+	}
+	noProxyLabel := slotLabel(i18n.M().Slots.NoProxyOption, "No Proxy (DIRECT)")
+	rows = append(rows, []string{noProxyIndicator, noProxyLabel, "DIRECT"})
+
 	for _, n := range nodes {
 		indicator := ""
 		if slotNodeMatchesRef(ref, &n) {
@@ -590,12 +614,15 @@ func (t *SlotsTab) openProxyPicker() {
 	t.view = slotsViewProxyPicker
 	t.refreshProxyRows()
 
-	selected := 0
-	nodes := t.nodesForProxyPicker()
-	for i := range nodes {
-		if slotNodeMatchesRef(ref, &nodes[i]) {
-			selected = i
-			break
+	selected := 0 // default to "No Proxy (DIRECT)" row
+	if ok {
+		// A node ref exists; find the matching node (offset by 1 for the "No Proxy" row)
+		nodes := t.nodesForProxyPicker()
+		for i := range nodes {
+			if slotNodeMatchesRef(ref, &nodes[i]) {
+				selected = i + 1
+				break
+			}
 		}
 	}
 	t.proxyList.SetSelected(selected)
@@ -772,7 +799,7 @@ func (t *SlotsTab) slotPowerSummary(slotID int) string {
 func (t *SlotsTab) slotProxySummary(slotID int) string {
 	ref, ok := t.cfg.GetSlotNodeRef(slotID)
 	if !ok {
-		return slotLabel(i18n.M().Slots.NoProxy, "Not set")
+		return slotLabel(i18n.M().Slots.NoProxyOption, "No Proxy (DIRECT)")
 	}
 	subName := ref.SubID
 	if t.subManager != nil {
@@ -997,13 +1024,11 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int, selected bool) stri
 	}
 
 	const indicatorPad = 3 // "▶  " or "   " — 3 chars
-	indicator := "   "
-	if selected {
-		indicator = styles.Primary.Render("▶") + "  "
-	}
-	indentPad := strings.Repeat(" ", indicatorPad)
+	const borderW = 2                          // left+right border chars
+	const padW = 2                            // left+right padding chars
 
-	innerWidth := cardWidth - 4 - indicatorPad // border(2) + padding(2) + indicator(3)
+	boxWidth := cardWidth - indicatorPad - borderW // content width passed to lipgloss (border added on top)
+	innerWidth := boxWidth - padW                   // text area after padding removed
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
@@ -1098,18 +1123,33 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int, selected bool) stri
 	}
 
 	cardBody := lipgloss.JoinVertical(lipgloss.Left,
-		indicator+header,
-		indentPad+infoLine,
+		header,
+		infoLine,
 	)
 
 	cardStyle := lipgloss.NewStyle().
-		Width(cardWidth).
+		Width(boxWidth).
 		Height(2).
 		Padding(0, 1).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(styles.MutedColor)
 
-	return cardStyle.Render(cardBody)
+	renderedCard := cardStyle.Render(cardBody)
+	cardHeight := lipgloss.Height(renderedCard)
+
+	indicatorStyle := lipgloss.NewStyle().
+		Width(indicatorPad).
+		Height(cardHeight)
+
+	var indicatorContent string
+	if selected {
+		indicatorContent = "\n" + styles.Primary.Render("▶")
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		indicatorStyle.Render(indicatorContent),
+		renderedCard,
+	)
 }
 
 func (t *SlotsTab) slotLatencyText(slotID int) string {
@@ -1127,7 +1167,7 @@ func (t *SlotsTab) slotLatencyText(slotID int) string {
 func (t *SlotsTab) slotProxySummaryShort(slotID int) string {
 	ref, ok := t.cfg.GetSlotNodeRef(slotID)
 	if !ok {
-		return "---"
+		return "DIRECT"
 	}
 	if ref.NodeName != "" {
 		return ref.NodeName
@@ -1135,7 +1175,7 @@ func (t *SlotsTab) slotProxySummaryShort(slotID int) string {
 	if ref.NodeServer != "" && ref.NodePort > 0 {
 		return fmt.Sprintf("%s:%d", ref.NodeServer, ref.NodePort)
 	}
-	return "---"
+	return "DIRECT"
 }
 
 func (t *SlotsTab) slotPortSummaryShort(slotID int) string {

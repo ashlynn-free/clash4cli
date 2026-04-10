@@ -110,6 +110,7 @@ type SlotsMessages struct {
 	Title              string `yaml:"title"`
 	Description        string `yaml:"description"`
 	NoProxy            string `yaml:"no_proxy"`
+	NoProxyOption      string `yaml:"no_proxy_option"`
 	NoUpstream         string `yaml:"no_upstream"`
 	Power              string `yaml:"power"`
 	Mode               string `yaml:"mode"`

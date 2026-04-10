@@ -76,6 +76,7 @@ slots:
   title: "Slots"
   description: "Each Slot is an independent proxy instance with its own port, mode, and node. This software is Slot-driven."
   no_proxy: "Not set"
+  no_proxy_option: "No Proxy (DIRECT)"
   no_upstream: "Direct"
   power: "Power"
   mode: "Mode"

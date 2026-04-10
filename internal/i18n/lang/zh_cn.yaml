@@ -76,6 +76,7 @@ slots:
   title: "槽位"
   description: "每个槽位是一个独立的代理实例，拥有独立的端口、模式和节点。本软件以槽位为核心驱动。"
   no_proxy: "未设置"
+  no_proxy_option: "无代理（直连）"
   no_upstream: "直连"
   power: "开关"
   mode: "模式"

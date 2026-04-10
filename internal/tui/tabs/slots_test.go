@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/proxy"
@@ -31,6 +32,30 @@ func TestSlotsTab_SpaceToggleReturnsRequest(t *testing.T) {
 	}
 	if req.SlotID != 0 {
 		t.Fatalf("expected slot 0, got %d", req.SlotID)
+	}
+
+	if updated.view != slotsViewList {
+		t.Fatalf("expected list view to remain active")
+	}
+}
+
+func TestSlotsTab_UpperD_DisconnectAll(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	tab := NewSlotsTab(config.DefaultConfig(), subscription.NewManager(), nil, nil)
+	tab.SetSize(120, 30)
+
+	updated, cmd := tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	if cmd == nil {
+		t.Fatalf("expected disconnect-all command")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(SlotDisconnectAllMsg); !ok {
+		t.Fatalf("expected SlotDisconnectAllMsg, got %T", msg)
 	}
 
 	if updated.view != slotsViewList {
@@ -66,7 +91,8 @@ func TestSlotsTab_SelectProxyPersistsNodeRef(t *testing.T) {
 		t.Fatalf("expected proxy picker, got %v", tab.view)
 	}
 
-	// Select first node
+	// Move past "No Proxy (DIRECT)" to first real node, then select it
+	tab, _ = tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = cmd
 	if tab.view != slotsViewList {
@@ -114,6 +140,26 @@ func TestSlotsTab_ViewListNeverExceedsHeight(t *testing.T) {
 		lines := strings.Split(view, "\n")
 		if len(lines) > height {
 			t.Errorf("height=%d: rendered %d lines, exceeds budget", height, len(lines))
+		}
+	}
+}
+
+func TestSlotsTab_SingleCardNeverExceedsWidth(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	for _, width := range []int{60, 80, 120} {
+		for _, selected := range []bool{false, true} {
+			tab := NewSlotsTab(config.DefaultConfig(), subscription.NewManager(), nil, nil)
+			tab.SetSize(width, 24)
+			card := tab.renderSlotCard(0, width, selected)
+			for i, line := range strings.Split(card, "\n") {
+				if dw := lipgloss.Width(line); dw > width {
+					t.Errorf("width=%d selected=%v card line %d: display width %d exceeds %d", width, selected, i, dw, width)
+				}
+			}
 		}
 	}
 }

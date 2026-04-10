@@ -646,6 +646,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tabs.SlotToggleRequestMsg:
 		cmds = append(cmds, m.toggleConfiguredSlot(msg.SlotID))
 
+	case tabs.SlotDisconnectAllMsg:
+		m.disconnectAllSlots()
+
 	case tabs.SlotRestartRequestMsg:
 		cmds = append(cmds, m.restartConfiguredSlot(msg.SlotID))
 
