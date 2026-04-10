@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## v0.8.4 - 2026-04-11
+
+### Added
+- Slots tab: press `D` to disconnect all running slots at once.
+- proxychains config now includes `quiet_mode` to suppress `[proxychains]` log lines.
+
 ## v0.8.3 - 2026-03-21
 
 ### Added
