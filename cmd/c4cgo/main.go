@@ -173,18 +173,22 @@ runCommand:
 	case "env":
 		useProxychains = false
 	default: // auto
-		useProxychains = proxychains != ""
-		// On macOS, DYLD injection is blocked for SIP-protected system binaries. Fall back to env proxy.
-		if useProxychains && runtime.GOOS == "darwin" {
+		if proxychains == "" {
+			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: proxychains4 not found\033[0m\n")
+			fmt.Fprintf(os.Stderr, "       Cannot guarantee traffic safety without proxychains.\n")
+			fmt.Fprintf(os.Stderr, "       Install proxychains4, or use --mode env at your own risk.\n")
+			os.Exit(1)
+		}
+		// On macOS, DYLD injection is blocked for SIP-protected system binaries.
+		if runtime.GOOS == "darwin" {
 			if cmdPath, err := exec.LookPath(args[0]); err == nil && isSIPProtectedDarwinPath(cmdPath) {
-				useProxychains = false
-				if verboseMode {
-					fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] macOS SIP may block proxychains for system binaries: %s\033[0m\n", cmdPath)
-					fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Falling back to: environment variables (HTTP_PROXY/ALL_PROXY)\033[0m\n")
-					fmt.Fprintf(os.Stderr, "\033[90m       Tip: install a non-system build of this command (e.g. Homebrew) or run with --mode proxychains.\033[0m\n")
-				}
+				fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: macOS SIP blocks proxychains for system binary: %s\033[0m\n", cmdPath)
+				fmt.Fprintf(os.Stderr, "       Traffic would NOT be proxied safely.\n")
+				fmt.Fprintf(os.Stderr, "       Install a non-system build (e.g. Homebrew) or use --mode env at your own risk.\n")
+				os.Exit(1)
 			}
 		}
+		useProxychains = true
 	}
 
 	if useProxychains {
@@ -196,31 +200,21 @@ runCommand:
 			fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
 		}
 		exitCode, stderr, err := runWithProxychains(proxychains, libPath, proxyHost, port, args)
-		if err != nil && runMode == "auto" && shouldFallbackToEnv(stderr) {
-			if verboseMode {
-				fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] proxychains failed on this system; falling back to environment variables\033[0m\n")
-				fmt.Fprintf(os.Stderr, "\033[90m       Tip: rebuild proxychains on the target machine, or run with --mode env\033[0m\n")
-				fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: proxychains failed - refusing to continue to prevent traffic leak\033[0m\n")
+			if stderr != "" {
+				fmt.Fprintf(os.Stderr, "       %s\n", firstLine(stderr))
 			}
-			exitCode, err = runWithEnvProxy(proxyHost, port, args)
+			fmt.Fprintf(os.Stderr, "       Fix proxychains or use --mode env at your own risk.\n")
+			os.Exit(1)
 		}
 		os.Exit(exitCode)
 	}
 
-	// Fallback to environment variables
+	// Environment variable proxy mode (--mode env only)
+	// WARNING: programs that ignore HTTP_PROXY/ALL_PROXY will leak traffic.
 	if verboseMode {
-		switch runMode {
-		case "env":
-			fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables\033[0m\n")
-		case "auto":
-			if proxychains == "" {
-				fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables (proxychains not found)\033[0m\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables (proxychains disabled)\033[0m\n")
-			}
-		default:
-			fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables\033[0m\n")
-		}
+		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables (traffic may leak!)\033[0m\n")
 		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] HTTP_PROXY: http://%s:%d\033[0m\n", proxyHost, port)
 		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] ALL_PROXY: socks5://%s:%d\033[0m\n", proxyHost, port)
 		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Command: %s\033[0m\n", args[0])
@@ -604,29 +598,14 @@ func findProxychainsLib(binaryPath, libName string, getenv func(string) string, 
 	return ""
 }
 
-func shouldFallbackToEnv(stderr string) bool {
-	if stderr == "" {
-		return false
+// firstLine returns the first non-empty line of s, or "" if s is empty.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return line
+		}
 	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "libproxychains4") {
-		return false
-	}
-
-	// Most common: glibc version mismatch when the library is built on a newer distro.
-	if strings.Contains(lower, "glibc_") && strings.Contains(lower, "not found") {
-		return true
-	}
-
-	// Other dynamic loader failures where env proxy is still a better-than-nothing fallback.
-	if strings.Contains(lower, "error while loading shared libraries") {
-		return true
-	}
-	if strings.Contains(lower, "wrong elf class") {
-		return true
-	}
-
-	return false
+	return ""
 }
 
 func runWithProxychains(proxychains, libPath string, host string, port int, args []string) (int, string, error) {
