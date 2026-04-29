@@ -60,6 +60,11 @@ type portChangedSaveMsg struct {
 	notice string
 }
 
+// tunChangedSaveMsg is an internal message indicating settings were saved and TUN was toggled.
+type tunChangedSaveMsg struct {
+	notice string
+}
+
 type slotUpstreamSavedMsg struct {
 	slotID  int
 	restart bool
@@ -115,6 +120,16 @@ type SettingsTab struct {
 	upstreamFields       []settingField
 	upstreamFocusedField int
 	upstreamScrollOffset int
+	// TUN / System Proxy settings secondary pages
+	showTunSettings         bool
+	tunFields               []settingField
+	tunFocusedField         int
+	tunScrollOffset         int
+	showSystemProxySettings bool
+	systemProxyFields       []settingField
+	systemProxyFocusedField int
+	systemProxyScrollOffset int
+	systemProxyStatus       *netctl.SystemProxyStatus
 }
 
 type settingField struct {
@@ -272,10 +287,10 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 		},
 	}
 
-	// Linux-only features: show on all platforms, but disable on non-Linux.
+	// Advanced network features: TUN is available on Linux and macOS; Docker hijack remains Linux-only.
 	linuxSection := i18n.M().Settings.LinuxFeatures
 	if linuxSection == "" {
-		linuxSection = "Linux Exclusive Features"
+		linuxSection = "Advanced Network Features"
 	}
 	fields = append(fields, settingField{
 		label:     "Upstream Proxies",
@@ -294,11 +309,34 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 		fieldType: FieldTypeHeader,
 	})
 
-	linuxOnlyDisabled := runtime.GOOS != "linux"
+	tunDisabled := (runtime.GOOS != "linux" && runtime.GOOS != "darwin") || os.Geteuid() != 0
+	dockerDisabled := runtime.GOOS != "linux"
+
+	fields = append(fields, settingField{
+		label:     "System Proxy",
+		fieldType: FieldTypeSelect,
+		key:       "system_proxy_enabled",
+		options:   tunOptions,
+		selectedIdx: func() int {
+			if cfg.Proxy.SystemProxy.Enabled {
+				return 0
+			}
+			return 1
+		}(),
+		disabled: runtime.GOOS != "darwin",
+	})
+
+	fields = append(fields, settingField{
+		label:     "System Proxy Settings >",
+		helpText:  "macOS only. Applies to all network services.",
+		fieldType: FieldTypeButton,
+		key:       "system_proxy_settings",
+		disabled:  runtime.GOOS != "darwin",
+	})
 
 	tunLabel := i18n.M().Settings.Tun
 	if tunLabel == "" {
-		tunLabel = "TUN mode (Linux)"
+		tunLabel = "TUN mode"
 	}
 	fields = append(fields, settingField{
 		label:       tunLabel,
@@ -306,7 +344,15 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 		key:         "tun_enabled",
 		options:     tunOptions,
 		selectedIdx: tunIdx,
-		disabled:    linuxOnlyDisabled,
+		disabled:    tunDisabled,
+	})
+
+	fields = append(fields, settingField{
+		label:     "TUN Settings >",
+		helpText:  "Main slot only. Advanced TUN configuration.",
+		fieldType: FieldTypeButton,
+		key:       "tun_settings",
+		disabled:  tunDisabled,
 	})
 
 	dockerLabel := i18n.M().Settings.DockerTCP
@@ -319,7 +365,7 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 		key:         "docker_redirect_tcp",
 		options:     dockerTCPOptions,
 		selectedIdx: dockerTCPIdx,
-		disabled:    linuxOnlyDisabled,
+		disabled:    dockerDisabled,
 	})
 
 	fields = append(fields,
@@ -371,6 +417,10 @@ func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version stri
 	tab.slotFields = tab.newSlotSettingsFields()
 	tab.loadSlotUpstreamDraft(0)
 	tab.upstreamFields = newUpstreamDetailFields()
+	tab.tunFields = tab.newTunSettingsFields()
+	tab.loadTunDraft()
+	tab.systemProxyFields = tab.newSystemProxySettingsFields()
+	tab.loadSystemProxyDraft()
 	return tab
 }
 
@@ -415,6 +465,125 @@ func (t *SettingsTab) buildUpstreamSelectOptions() []selectOption {
 		})
 	}
 	return options
+}
+
+func (t *SettingsTab) newTunSettingsFields() []settingField {
+	tunDefaultStack := "system"
+	if runtime.GOOS == "darwin" {
+		tunDefaultStack = "mixed"
+	}
+	tunStackOptions := []selectOption{{label: "mixed", value: "mixed"}, {label: "gvisor", value: "gvisor"}, {label: "system", value: "system"}}
+	tunStackIdx := 0
+	for i, opt := range tunStackOptions {
+		if opt.value == t.cfg.Proxy.TunStack || (t.cfg.Proxy.TunStack == "" && opt.value == tunDefaultStack) {
+			tunStackIdx = i
+			break
+		}
+	}
+	tunDeviceInput := textinput.New()
+	tunDeviceInput.CharLimit = 64
+	tunDeviceInput.SetValue(t.cfg.Proxy.TunDevice)
+	tunMTUInput := textinput.New()
+	tunMTUInput.CharLimit = 5
+	if t.cfg.Proxy.TunMTU > 0 {
+		tunMTUInput.SetValue(fmt.Sprintf("%d", t.cfg.Proxy.TunMTU))
+	}
+	dnsHijackInput := textinput.New()
+	dnsHijackInput.CharLimit = 255
+	dnsHijackInput.SetValue(strings.Join(t.cfg.Proxy.TunDNSHijack, ", "))
+	routeExcludeInput := textinput.New()
+	routeExcludeInput.CharLimit = 255
+	routeExcludeInput.SetValue(strings.Join(t.cfg.Proxy.TunRouteExcludeAddress, ", "))
+	autoRouteIdx := 1
+	if t.cfg.Proxy.TunAutoRoute {
+		autoRouteIdx = 0
+	}
+	strictRouteIdx := 1
+	if t.cfg.Proxy.TunStrictRoute {
+		strictRouteIdx = 0
+	}
+	autoDetectIdx := 1
+	if t.cfg.Proxy.TunAutoDetectInterface {
+		autoDetectIdx = 0
+	}
+	onOff := []selectOption{{label: i18n.M().Settings.On, value: "true"}, {label: i18n.M().Settings.Off, value: "false"}}
+	return []settingField{
+		{label: "Tun Mode", fieldType: FieldTypeHeader},
+		{label: "Tun Stack", helpText: fmt.Sprintf("Main slot only. Default: %s", tunDefaultStack), fieldType: FieldTypeSelect, key: "tun_stack", options: tunStackOptions, selectedIdx: tunStackIdx},
+		{label: "Device Name", helpText: "macOS: leave empty and let the system assign utun automatically.", fieldType: FieldTypeInput, key: "tun_device", input: tunDeviceInput},
+		{label: "Auto Route", fieldType: FieldTypeSelect, key: "tun_auto_route", options: onOff, selectedIdx: autoRouteIdx},
+		{label: "Strict Route", fieldType: FieldTypeSelect, key: "tun_strict_route", options: onOff, selectedIdx: strictRouteIdx},
+		{label: "Auto Detect Interface", fieldType: FieldTypeSelect, key: "tun_auto_detect_interface", options: onOff, selectedIdx: autoDetectIdx},
+		{label: "DNS Hijack", helpText: "Comma-separated values like any:53", fieldType: FieldTypeInput, key: "tun_dns_hijack", input: dnsHijackInput},
+		{label: "Max Transmission Unit", helpText: "Optional. Leave empty to use mihomo default.", fieldType: FieldTypeInput, key: "tun_mtu", input: tunMTUInput, numericOnly: true},
+		{label: "Route Exclude Address", helpText: "Comma-separated CIDRs.", fieldType: FieldTypeInput, key: "tun_route_exclude_address", input: routeExcludeInput},
+	}
+}
+
+func (t *SettingsTab) loadTunDraft() {
+	t.tunFocusedField = 1
+	t.tunScrollOffset = 0
+	for i := range t.tunFields {
+		if t.tunFields[i].fieldType == FieldTypeInput {
+			t.tunFields[i].input.Blur()
+		}
+	}
+	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
+		t.tunFields[t.tunFocusedField].input.Focus()
+	}
+}
+
+func (t *SettingsTab) newSystemProxySettingsFields() []settingField {
+	hostInput := textinput.New()
+	hostInput.CharLimit = 255
+	hostInput.SetValue(t.cfg.Proxy.SystemProxy.Host)
+	guardInput := textinput.New()
+	guardInput.CharLimit = 4
+	guardInput.SetValue(fmt.Sprintf("%d", t.cfg.Proxy.SystemProxy.GuardDurationSeconds))
+	bypassInput := textinput.New()
+	bypassInput.CharLimit = 255
+	bypassInput.SetValue(strings.Join(t.cfg.Proxy.SystemProxy.Bypass, ", "))
+	onOff := []selectOption{{label: i18n.M().Settings.On, value: "true"}, {label: i18n.M().Settings.Off, value: "false"}}
+	pacIdx := 1
+	if t.cfg.Proxy.SystemProxy.PACMode {
+		pacIdx = 0
+	}
+	guardIdx := 1
+	if t.cfg.Proxy.SystemProxy.ProxyGuard {
+		guardIdx = 0
+	}
+	alwaysBypassIdx := 1
+	if t.cfg.Proxy.SystemProxy.AlwaysUseDefaultBypass {
+		alwaysBypassIdx = 0
+	}
+	validateIdx := 1
+	if t.cfg.Proxy.SystemProxy.ValidateBypassFormat {
+		validateIdx = 0
+	}
+	return []settingField{
+		{label: "System Proxy Setting", fieldType: FieldTypeHeader},
+		{label: "Proxy Host", fieldType: FieldTypeInput, key: "system_proxy_host", input: hostInput},
+		{label: "Use PAC Mode", fieldType: FieldTypeSelect, key: "system_proxy_pac_mode", options: onOff, selectedIdx: pacIdx},
+		{label: "Proxy Guard", fieldType: FieldTypeSelect, key: "system_proxy_guard", options: onOff, selectedIdx: guardIdx},
+		{label: "Guard Duration", helpText: "Seconds", fieldType: FieldTypeInput, key: "system_proxy_guard_duration", input: guardInput, numericOnly: true},
+		{label: "Always use Default Bypass", fieldType: FieldTypeSelect, key: "system_proxy_default_bypass", options: onOff, selectedIdx: alwaysBypassIdx},
+		{label: "Validate Proxy Bypass Format", fieldType: FieldTypeSelect, key: "system_proxy_validate_bypass", options: onOff, selectedIdx: validateIdx},
+		{label: "Bypass", helpText: "Comma-separated values.", fieldType: FieldTypeInput, key: "system_proxy_bypass", input: bypassInput},
+		{label: "Save", fieldType: FieldTypeButton, key: "system_proxy_save"},
+	}
+}
+
+func (t *SettingsTab) loadSystemProxyDraft() {
+	t.systemProxyFocusedField = 1
+	t.systemProxyScrollOffset = 0
+	for i := range t.systemProxyFields {
+		if t.systemProxyFields[i].fieldType == FieldTypeInput {
+			t.systemProxyFields[i].input.Blur()
+		}
+	}
+	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
+		t.systemProxyFields[t.systemProxyFocusedField].input.Focus()
+	}
 }
 
 func newUpstreamDetailFields() []settingField {
@@ -581,6 +750,14 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		return t.updateSlotList(msg)
 	}
 
+	if t.showTunSettings {
+		return t.updateTunSettings(msg)
+	}
+
+	if t.showSystemProxySettings {
+		return t.updateSystemProxySettings(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if field := t.focusedInputField(); field != nil {
@@ -652,6 +829,18 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 					t.showSlotDetail = false
 					return t, nil
 				}
+				if field.fieldType == FieldTypeButton && field.key == "tun_settings" {
+					t.tunFields = t.newTunSettingsFields()
+					t.loadTunDraft()
+					t.showTunSettings = true
+					return t, nil
+				}
+				if field.fieldType == FieldTypeButton && field.key == "system_proxy_settings" {
+					t.systemProxyFields = t.newSystemProxySettingsFields()
+					t.loadSystemProxyDraft()
+					t.showSystemProxySettings = true
+					return t, nil
+				}
 			}
 			if t.focusedField == len(t.fields) {
 				// Restart core button
@@ -667,6 +856,9 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 				if field.selectedIdx < 0 {
 					field.selectedIdx = len(field.options) - 1
 				}
+				if field.key == "tun_enabled" {
+					t.applyTunFieldState()
+				}
 				return t, t.saveSettings()
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
@@ -676,6 +868,9 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 				field.selectedIdx++
 				if field.selectedIdx >= len(field.options) {
 					field.selectedIdx = 0
+				}
+				if field.key == "tun_enabled" {
+					t.applyTunFieldState()
 				}
 				return t, t.saveSettings()
 			}
@@ -691,7 +886,19 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		t.messageShow = true
 		return t, t.startFlash(3 * time.Second)
 
-	case portChangedSaveMsg:
+	case tunChangedSaveMsg:
+			t.message = "TUN setting changed — restarting all slots..."
+			if msg.notice != "" {
+				t.message = msg.notice + " TUN setting changed — restarting all slots..."
+			}
+			t.messageType = "success"
+			t.messageShow = true
+			return t, tea.Batch(
+				t.startFlash(3*time.Second),
+				func() tea.Msg { return RestartAllSlotsMsg{} },
+			)
+
+		case portChangedSaveMsg:
 		t.message = "Port changed — restarting all slots..."
 		if msg.notice != "" {
 			t.message = msg.notice + " Port changed — restarting all slots..."
@@ -808,6 +1015,17 @@ func (t *SettingsTab) isFieldFocusable(index int) bool {
 	return true
 }
 
+func (t *SettingsTab) applyTunFieldState() {
+	enabled := false
+	if field := t.fieldByKey("tun_enabled"); field != nil && len(field.options) > 0 {
+		enabled = field.options[field.selectedIdx].value == "true"
+	}
+	for _, key := range []string{"tun_stack", "tun_mtu", "tun_device"} {
+		if field := t.fieldByKey(key); field != nil {
+			field.disabled = !enabled
+		}
+	}
+}
 func filterDigits(runes []rune) []rune {
 	out := make([]rune, 0, len(runes))
 	for _, r := range runes {
@@ -836,6 +1054,24 @@ func (t *SettingsTab) slotFieldByKey(key string) *settingField {
 	for i := range t.slotFields {
 		if t.slotFields[i].key == key {
 			return &t.slotFields[i]
+		}
+	}
+	return nil
+}
+
+func (t *SettingsTab) tunFieldByKey(key string) *settingField {
+	for i := range t.tunFields {
+		if t.tunFields[i].key == key {
+			return &t.tunFields[i]
+		}
+	}
+	return nil
+}
+
+func (t *SettingsTab) systemProxyFieldByKey(key string) *settingField {
+	for i := range t.systemProxyFields {
+		if t.systemProxyFields[i].key == key {
+			return &t.systemProxyFields[i]
 		}
 	}
 	return nil
@@ -870,6 +1106,485 @@ func (t *SettingsTab) loadSlotUpstreamDraft(slotID int) {
 			t.slotFields[i].input.Blur()
 		}
 	}
+}
+
+func parseCSVList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
+}
+
+func (t *SettingsTab) focusedTunInputField() *settingField {
+	if t.tunFocusedField < 0 || t.tunFocusedField >= len(t.tunFields) {
+		return nil
+	}
+	if t.tunFields[t.tunFocusedField].fieldType != FieldTypeInput || t.tunFields[t.tunFocusedField].disabled {
+		return nil
+	}
+	return &t.tunFields[t.tunFocusedField]
+}
+
+func (t *SettingsTab) focusedSystemProxyInputField() *settingField {
+	if t.systemProxyFocusedField < 0 || t.systemProxyFocusedField >= len(t.systemProxyFields) {
+		return nil
+	}
+	if t.systemProxyFields[t.systemProxyFocusedField].fieldType != FieldTypeInput || t.systemProxyFields[t.systemProxyFocusedField].disabled {
+		return nil
+	}
+	return &t.systemProxyFields[t.systemProxyFocusedField]
+}
+
+func (t *SettingsTab) tunFocusNext() {
+	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
+		t.tunFields[t.tunFocusedField].input.Blur()
+	}
+	for {
+		t.tunFocusedField++
+		if t.tunFocusedField >= len(t.tunFields) {
+			t.tunFocusedField = 0
+		}
+		if t.tunFocusedField >= len(t.tunFields) || (t.tunFields[t.tunFocusedField].fieldType != FieldTypeHeader && !t.tunFields[t.tunFocusedField].disabled) {
+			break
+		}
+	}
+	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
+		t.tunFields[t.tunFocusedField].input.Focus()
+		t.armedReplace = true
+	} else {
+		t.armedReplace = false
+	}
+}
+
+func (t *SettingsTab) tunFocusPrev() {
+	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
+		t.tunFields[t.tunFocusedField].input.Blur()
+	}
+	for {
+		t.tunFocusedField--
+		if t.tunFocusedField < 0 {
+			t.tunFocusedField = len(t.tunFields) - 1
+		}
+		if t.tunFocusedField >= len(t.tunFields) || (t.tunFields[t.tunFocusedField].fieldType != FieldTypeHeader && !t.tunFields[t.tunFocusedField].disabled) {
+			break
+		}
+	}
+	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
+		t.tunFields[t.tunFocusedField].input.Focus()
+		t.armedReplace = true
+	} else {
+		t.armedReplace = false
+	}
+}
+
+func (t *SettingsTab) systemProxyFocusNext() {
+	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
+		t.systemProxyFields[t.systemProxyFocusedField].input.Blur()
+	}
+	for {
+		t.systemProxyFocusedField++
+		if t.systemProxyFocusedField >= len(t.systemProxyFields) {
+			t.systemProxyFocusedField = 0
+		}
+		if t.systemProxyFocusedField >= len(t.systemProxyFields) || (t.systemProxyFields[t.systemProxyFocusedField].fieldType != FieldTypeHeader && !t.systemProxyFields[t.systemProxyFocusedField].disabled) {
+			break
+		}
+	}
+	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
+		t.systemProxyFields[t.systemProxyFocusedField].input.Focus()
+		t.armedReplace = true
+	} else {
+		t.armedReplace = false
+	}
+}
+
+func (t *SettingsTab) systemProxyFocusPrev() {
+	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
+		t.systemProxyFields[t.systemProxyFocusedField].input.Blur()
+	}
+	for {
+		t.systemProxyFocusedField--
+		if t.systemProxyFocusedField < 0 {
+			t.systemProxyFocusedField = len(t.systemProxyFields) - 1
+		}
+		if t.systemProxyFocusedField >= len(t.systemProxyFields) || (t.systemProxyFields[t.systemProxyFocusedField].fieldType != FieldTypeHeader && !t.systemProxyFields[t.systemProxyFocusedField].disabled) {
+			break
+		}
+	}
+	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
+		t.systemProxyFields[t.systemProxyFocusedField].input.Focus()
+		t.armedReplace = true
+	} else {
+		t.armedReplace = false
+	}
+}
+
+func (t *SettingsTab) saveTunSettings() tea.Cmd {
+	return func() tea.Msg {
+		for _, field := range t.tunFields {
+			switch field.key {
+			case "tun_stack":
+				t.cfg.Proxy.TunStack = field.options[field.selectedIdx].value
+			case "tun_device":
+				t.cfg.Proxy.TunDevice = strings.TrimSpace(field.input.Value())
+			case "tun_auto_route":
+				t.cfg.Proxy.TunAutoRoute = field.options[field.selectedIdx].value == "true"
+			case "tun_strict_route":
+				t.cfg.Proxy.TunStrictRoute = field.options[field.selectedIdx].value == "true"
+			case "tun_auto_detect_interface":
+				t.cfg.Proxy.TunAutoDetectInterface = field.options[field.selectedIdx].value == "true"
+			case "tun_dns_hijack":
+				t.cfg.Proxy.TunDNSHijack = parseCSVList(field.input.Value())
+			case "tun_mtu":
+				v := strings.TrimSpace(field.input.Value())
+				if v == "" {
+					t.cfg.Proxy.TunMTU = 0
+				} else {
+					n, err := strconv.Atoi(v)
+					if err != nil || n <= 0 || n >= 65536 {
+						return SettingsErrorMsg{Error: fmt.Errorf("invalid tun_mtu value: %q", field.input.Value())}
+					}
+					t.cfg.Proxy.TunMTU = n
+				}
+			case "tun_route_exclude_address":
+				t.cfg.Proxy.TunRouteExcludeAddress = parseCSVList(field.input.Value())
+			}
+		}
+		if err := t.cfg.Save(); err != nil {
+			return SettingsErrorMsg{Error: err}
+		}
+		return tunChangedSaveMsg{notice: "Saved TUN settings"}
+	}
+}
+
+func (t *SettingsTab) saveSystemProxySettings() tea.Cmd {
+	return func() tea.Msg {
+		for _, field := range t.systemProxyFields {
+			switch field.key {
+			case "system_proxy_host":
+				t.cfg.Proxy.SystemProxy.Host = strings.TrimSpace(field.input.Value())
+			case "system_proxy_pac_mode":
+				t.cfg.Proxy.SystemProxy.PACMode = field.options[field.selectedIdx].value == "true"
+			case "system_proxy_guard":
+				t.cfg.Proxy.SystemProxy.ProxyGuard = field.options[field.selectedIdx].value == "true"
+			case "system_proxy_guard_duration":
+				v := strings.TrimSpace(field.input.Value())
+				if v != "" {
+					n, err := strconv.Atoi(v)
+					if err != nil || n <= 0 {
+						return SettingsErrorMsg{Error: fmt.Errorf("invalid guard duration: %q", field.input.Value())}
+					}
+					t.cfg.Proxy.SystemProxy.GuardDurationSeconds = n
+				}
+			case "system_proxy_default_bypass":
+				t.cfg.Proxy.SystemProxy.AlwaysUseDefaultBypass = field.options[field.selectedIdx].value == "true"
+			case "system_proxy_validate_bypass":
+				t.cfg.Proxy.SystemProxy.ValidateBypassFormat = field.options[field.selectedIdx].value == "true"
+			case "system_proxy_bypass":
+				t.cfg.Proxy.SystemProxy.Bypass = parseCSVList(field.input.Value())
+			}
+		}
+		if err := t.cfg.Save(); err != nil {
+			return SettingsErrorMsg{Error: err}
+		}
+		status, err := netctl.ReadSystemProxyStatus()
+		if err == nil {
+			t.systemProxyStatus = status
+		}
+		return SettingsSavedMsg{Message: "Saved system proxy settings"}
+	}
+}
+
+func (t *SettingsTab) updateTunSettings(msg tea.Msg) (*SettingsTab, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if field := t.focusedTunInputField(); field != nil {
+			switch {
+			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+				t.showTunSettings = false
+				return t, nil
+			case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+				cmd := t.saveTunSettings()
+				t.tunFocusPrev()
+				return t, cmd
+			case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+				cmd := t.saveTunSettings()
+				t.tunFocusNext()
+				return t, cmd
+			default:
+				return t, t.updateInputField(field, msg)
+			}
+		}
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
+			t.showTunSettings = false
+			return t, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+			cmd := t.saveTunSettings()
+			t.tunFocusPrev()
+			return t, cmd
+		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+			cmd := t.saveTunSettings()
+			t.tunFocusNext()
+			return t, cmd
+		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
+			if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeSelect && !t.tunFields[t.tunFocusedField].disabled {
+				f := &t.tunFields[t.tunFocusedField]
+				f.selectedIdx--
+				if f.selectedIdx < 0 {
+					f.selectedIdx = len(f.options) - 1
+				}
+				return t, t.saveTunSettings()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
+			if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeSelect && !t.tunFields[t.tunFocusedField].disabled {
+				f := &t.tunFields[t.tunFocusedField]
+				f.selectedIdx++
+				if f.selectedIdx >= len(f.options) {
+					f.selectedIdx = 0
+				}
+				return t, t.saveTunSettings()
+			}
+		}
+	case tunChangedSaveMsg:
+		t.showTunSettings = false
+		return t, tea.Batch(
+			t.startFlash(3*time.Second),
+			func() tea.Msg { return RestartAllSlotsMsg{} },
+		)
+	case SettingsSavedMsg, SettingsErrorMsg, settingsFlashTickMsg:
+		return t, nil
+	}
+	return t, nil
+}
+
+func (t *SettingsTab) updateSystemProxySettings(msg tea.Msg) (*SettingsTab, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if field := t.focusedSystemProxyInputField(); field != nil {
+			switch {
+			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+				t.showSystemProxySettings = false
+				return t, nil
+			case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+				t.systemProxyFocusPrev()
+				return t, nil
+			case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+				t.systemProxyFocusNext()
+				return t, nil
+			default:
+				return t, t.updateInputField(field, msg)
+			}
+		}
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
+			t.showSystemProxySettings = false
+			return t, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+			t.systemProxyFocusPrev()
+			return t, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+			t.systemProxyFocusNext()
+			return t, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeButton && t.systemProxyFields[t.systemProxyFocusedField].key == "system_proxy_save" {
+				return t, t.saveSystemProxySettings()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
+			if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeSelect && !t.systemProxyFields[t.systemProxyFocusedField].disabled {
+				f := &t.systemProxyFields[t.systemProxyFocusedField]
+				f.selectedIdx--
+				if f.selectedIdx < 0 {
+					f.selectedIdx = len(f.options) - 1
+				}
+				return t, nil
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
+			if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeSelect && !t.systemProxyFields[t.systemProxyFocusedField].disabled {
+				f := &t.systemProxyFields[t.systemProxyFocusedField]
+				f.selectedIdx++
+				if f.selectedIdx >= len(f.options) {
+					f.selectedIdx = 0
+				}
+				return t, nil
+			}
+		}
+	case SettingsSavedMsg, SettingsErrorMsg, settingsFlashTickMsg:
+		return t, nil
+	}
+	return t, nil
+}
+
+func renderSettingsSubpage(title string, fields []settingField, focused int, scrollOffset *int, width, height int, message, messageType string, messageShow bool) string {
+	var lines []string
+	focusedLine := 0
+	lines = append(lines, styles.Title.Render(title), "")
+
+	appendBlock := func(block string) {
+		lines = append(lines, strings.Split(block, "\n")...)
+	}
+	appendLine := func(line string) {
+		lines = append(lines, line)
+	}
+
+	for i, field := range fields {
+		if field.fieldType == FieldTypeHeader {
+			if i == focused {
+				focusedLine = len(lines)
+			}
+			appendBlock(styles.Title.Render(field.label))
+			appendLine("")
+			continue
+		}
+		if field.fieldType == FieldTypeButton {
+			if i == focused {
+				focusedLine = len(lines)
+			}
+			btnLabel := field.label
+			if i == focused {
+				btnLabel = styles.StatusConnected.Render("▶ [" + btnLabel + "]")
+			} else {
+				btnLabel = styles.Muted.Render("  [" + btnLabel + "]")
+			}
+			appendBlock(btnLabel)
+			appendLine("")
+			continue
+		}
+		if i == focused {
+			focusedLine = len(lines)
+		}
+		label := field.label
+		if i == focused {
+			label = styles.Primary.Render("▶ " + label)
+		} else {
+			label = "  " + label
+		}
+		if field.disabled {
+			label = styles.Muted.Render("  " + field.label)
+		}
+		appendBlock(label)
+		if field.helpText != "" {
+			helpText := "    " + field.helpText
+			if field.disabled {
+				helpText = styles.Muted.Render(helpText)
+			} else {
+				helpText = styles.HelpText.Render(helpText)
+			}
+			appendBlock(helpText)
+		}
+		switch field.fieldType {
+		case FieldTypeInput:
+			inputStyle := styles.InputField
+			if i == focused {
+				inputStyle = styles.InputFocused
+			}
+			appendBlock(inputStyle.Render(field.input.View()))
+			appendLine("")
+		case FieldTypeSelect:
+			appendBlock(renderSelectStatic(field, i == focused))
+			appendLine("")
+		}
+	}
+
+	if message != "" && messageShow {
+		appendLine("")
+		if messageType == "success" {
+			appendBlock(styles.SuccessMessage.Render(message))
+		} else {
+			appendBlock(styles.ErrorMessage.Render(message))
+		}
+	}
+
+	help := styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" navigate  ") +
+		styles.HelpKey.Render("←/→") + styles.HelpText.Render(" select  ") +
+		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" save  ") +
+		styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
+
+	if height <= 0 {
+		return styles.ContentArea.Render(strings.Join(append(lines, "", help), "\n"))
+	}
+
+	needsScroll := len(lines) > height-1
+	showScrollIndicator := needsScroll && height > 2
+	reservedBottom := 1
+	if showScrollIndicator {
+		reservedBottom = 2
+	}
+	visibleHeight := height - reservedBottom
+	if visibleHeight < 1 {
+		visibleHeight = 1
+	}
+	if focusedLine < *scrollOffset {
+		*scrollOffset = focusedLine
+	}
+	if focusedLine >= *scrollOffset+visibleHeight {
+		*scrollOffset = focusedLine - visibleHeight + 1
+	}
+	if *scrollOffset < 0 {
+		*scrollOffset = 0
+	}
+	maxOffset := len(lines) - visibleHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if *scrollOffset > maxOffset {
+		*scrollOffset = maxOffset
+	}
+	start := *scrollOffset
+	end := *scrollOffset + visibleHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	content := strings.Join(lines[start:end], "\n")
+	if showScrollIndicator {
+		scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
+		scrollInfo := lipgloss.NewStyle().Foreground(styles.MutedColor).Width(width).Align(lipgloss.Right).Render(scrollText)
+		content += "\n" + scrollInfo
+	}
+	content += "\n" + help
+	return styles.ContentArea.Render(content)
+}
+
+func renderSelectStatic(field settingField, focused bool) string {
+	if len(field.options) == 0 {
+		return ""
+	}
+	idx := field.selectedIdx
+	if idx < 0 || idx >= len(field.options) {
+		idx = 0
+	}
+	opt := field.options[idx]
+	label := " " + opt.label + " "
+	if field.disabled {
+		return styles.Muted.Render("◀") + " " + styles.Muted.Render(label) + " " + styles.Muted.Render("▶")
+	}
+	if focused {
+		label = styles.SelectOptionActive.Render(label)
+	} else {
+		label = styles.SelectOptionSelected.Render(label)
+	}
+	return styles.Muted.Render("◀") + " " + label + " " + styles.Muted.Render("▶")
+}
+
+func (t *SettingsTab) viewTunSettings() string {
+	return renderSettingsSubpage("Tun Mode", t.tunFields, t.tunFocusedField, &t.tunScrollOffset, t.width, t.height, t.message, t.messageType, t.messageShow)
+}
+
+func (t *SettingsTab) viewSystemProxySettings() string {
+	title := "System Proxy Setting"
+	if t.systemProxyStatus != nil {
+		state := "Disabled"
+		if t.systemProxyStatus.Enabled {
+			state = "Enabled"
+		}
+		title = fmt.Sprintf("System Proxy Setting (%s)", state)
+	}
+	return renderSettingsSubpage(title, t.systemProxyFields, t.systemProxyFocusedField, &t.systemProxyScrollOffset, t.width, t.height, t.message, t.messageType, t.messageShow)
 }
 
 func (t *SettingsTab) saveSlotUpstream() tea.Cmd {
@@ -1713,6 +2428,12 @@ func (t *SettingsTab) View() string {
 	if t.showSlotList {
 		return t.viewSlotList()
 	}
+	if t.showTunSettings {
+		return t.viewTunSettings()
+	}
+	if t.showSystemProxySettings {
+		return t.viewSystemProxySettings()
+	}
 	var lines []string
 	// Track the rendered line index where the focused item starts.
 	focusedLine := 0
@@ -2163,6 +2884,36 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 				default:
 					return SettingsErrorMsg{Error: fmt.Errorf("invalid update_via_proxy value: %q", v)}
 				}
+			case "system_proxy_enabled":
+				v := field.options[field.selectedIdx].value
+				desired := v == "true"
+				if desired != t.cfg.Proxy.SystemProxy.Enabled && runtime.GOOS == "darwin" {
+					if desired {
+						snapshot, err := netctl.SnapshotSystemProxy()
+						if err != nil {
+							return SettingsErrorMsg{Error: err}
+						}
+						if err := netctl.SaveSystemProxySnapshot(snapshot); err != nil {
+							return SettingsErrorMsg{Error: err}
+						}
+						if err := netctl.ApplySystemProxy(t.cfg.Proxy.SystemProxy); err != nil {
+							_ = netctl.RestoreSystemProxy(snapshot)
+							return SettingsErrorMsg{Error: err}
+						}
+					} else {
+						snapshot, err := netctl.LoadSystemProxySnapshot()
+						if err != nil {
+							return SettingsErrorMsg{Error: err}
+						}
+						if snapshot != nil {
+							if err := netctl.RestoreSystemProxy(snapshot); err != nil {
+								return SettingsErrorMsg{Error: err}
+							}
+							_ = netctl.ClearSystemProxySnapshot()
+						}
+					}
+				}
+				t.cfg.Proxy.SystemProxy.Enabled = desired
 			case "tun_enabled":
 				v := field.options[field.selectedIdx].value
 				switch v {
@@ -2173,6 +2924,21 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 				default:
 					return SettingsErrorMsg{Error: fmt.Errorf("invalid tun_enabled value: %q", v)}
 				}
+			case "tun_stack":
+				t.cfg.Proxy.TunStack = field.options[field.selectedIdx].value
+			case "tun_mtu":
+				value := strings.TrimSpace(field.input.Value())
+				if value == "" {
+					t.cfg.Proxy.TunMTU = 0
+					break
+				}
+				n, err := strconv.Atoi(value)
+				if err != nil || n <= 0 || n >= 65536 {
+					return SettingsErrorMsg{Error: fmt.Errorf("invalid tun_mtu value: %q", field.input.Value())}
+				}
+				t.cfg.Proxy.TunMTU = n
+			case "tun_device":
+				t.cfg.Proxy.TunDevice = strings.TrimSpace(field.input.Value())
 			case "docker_redirect_tcp":
 				v := field.options[field.selectedIdx].value
 				switch v {
@@ -2262,6 +3028,9 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 			}
 		}
 
+		if prevTun != t.cfg.Proxy.TunEnabled {
+			return tunChangedSaveMsg{notice: notice}
+		}
 		if t.cfg.Proxy.MixedPort != prevPort {
 			return portChangedSaveMsg{notice: notice}
 		}

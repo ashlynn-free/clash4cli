@@ -60,13 +60,8 @@ func TestNew_RestoreActiveSubscriptionAndSelectedNodeFromConfig(t *testing.T) {
 		t.Fatalf("unexpected selectedNode: %#v", m.selectedNode)
 	}
 
-	// After a node refresh, the preselect should land on the expected node in the table.
-	nodes := subMgr2.GetNodesForSubscription(sub.ID)
-	m.nodesTab, _ = m.nodesTab.Update(tabs.NodesRefreshedMsg{Nodes: nodes})
-	n := m.nodesTab.GetSelectedNode()
-	if n == nil || n.Name != "TestNode" {
-		t.Fatalf("expected Nodes tab selected node to be TestNode, got %#v", n)
-	}
+	// The selected node should be restored into model state; the reusable NodeBrowser
+	// now consumes that state when opened from Slots or Subscriptions.
 }
 
 func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
@@ -92,7 +87,6 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 		t.Fatalf("AddManual: %v", err)
 	}
 
-	// Write a v1 lock file (will be wrapped as slot 0).
 	lock := proxy.LockFile{
 		Port:       12345,
 		APIPort:    12346,
@@ -140,7 +134,6 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 		t.Fatalf("expected selectedNode restored from lock, got %#v", m.selectedNode)
 	}
 
-	// Verify slot 0 was restored
 	state := slotMgr.GetSlotState(0)
 	if state == nil {
 		t.Fatalf("expected slot 0 to be restored from lock file")
@@ -149,7 +142,6 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 		t.Fatalf("expected slot 0 node=TestNode, got %q", state.NodeName)
 	}
 
-	// Stop "alive" detection for cleanup.
 	reachable = false
 	time.Sleep(50 * time.Millisecond)
 }

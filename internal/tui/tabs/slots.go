@@ -80,7 +80,7 @@ type SlotsTab struct {
 	height int
 
 	view         slotsView
-	proxyList    *components.Table
+	nodeBrowser  *components.NodeBrowser
 	upstreamList *components.Table
 
 	slotListIndex      int
@@ -88,8 +88,6 @@ type SlotsTab struct {
 	activeSlot         int
 	detailCursor       int
 	portChoiceIndex    int
-	proxySubID         string
-	proxySubIndex      int
 	manualPortInput    textinput.Model
 	manualPortSelected bool
 	message            string
@@ -113,7 +111,7 @@ func NewSlotsTab(cfg *config.Config, subMgr *subscription.Manager, slotMgr *prox
 		nodeMgr:         nodeMgr,
 		view:            slotsViewList,
 		detailCursor:    cardFocusProxy,
-		proxyList:       components.NewTable(nil),
+		nodeBrowser:     components.NewNodeBrowser(cfg, nodeMgr, subMgr),
 		upstreamList:    components.NewTable(nil),
 		manualPortInput: manualPortInput,
 	}
@@ -146,7 +144,8 @@ func (t *SlotsTab) IsFullScreen() bool {
 func (t *SlotsTab) SetSize(width, height int) {
 	t.width = width
 	t.height = height
-	t.refreshTables()
+	t.nodeBrowser.SetSize(width, height)
+	t.refreshUpstreamRows()
 }
 
 // SetSlotTraffic updates the live traffic info for a slot.
@@ -160,6 +159,20 @@ func (t *SlotsTab) SetSlotTraffic(slotID int, info *SlotTrafficInfo) {
 func (t *SlotsTab) ClearSlotTraffic(slotID int) {
 	if slotID >= 0 && slotID < proxy.MaxSlots {
 		t.slotTraffic[slotID] = nil
+	}
+}
+
+// SetNodeBrowserIndicators forwards slot indicators to the embedded browser.
+func (t *SlotsTab) SetNodeBrowserIndicators(indicators map[string]components.SlotIndicator) {
+	if t.nodeBrowser != nil {
+		t.nodeBrowser.SetSlotIndicators(indicators)
+	}
+}
+
+// SetNodeBrowserTraffic forwards per-node traffic strings to the embedded browser.
+func (t *SlotsTab) SetNodeBrowserTraffic(traffic map[string]string) {
+	if t.nodeBrowser != nil {
+		t.nodeBrowser.SetSlotTraffic(traffic)
 	}
 }
 
@@ -186,7 +199,7 @@ func (t *SlotsTab) Update(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 
 	switch t.view {
 	case slotsViewProxyPicker:
-		return t.updateProxyPicker(msg)
+		return t.updateNodeBrowser(msg)
 	case slotsViewPortPicker:
 		return t.updatePortPicker(msg)
 	case slotsViewManualPortInput:
@@ -259,47 +272,6 @@ func (t *SlotsTab) updateList(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
 			return t, func() tea.Msg {
 				return SlotDisconnectAllMsg{}
-			}
-		}
-	}
-	return t, nil
-}
-
-func (t *SlotsTab) updateProxyPicker(msg tea.Msg) (*SlotsTab, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.view = slotsViewList
-		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
-			t.switchProxySubscription(-1)
-		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
-			t.switchProxySubscription(1)
-		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
-			t.proxyList.MoveUp()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
-			t.proxyList.MoveDown()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			idx := t.proxyList.Selected()
-			if idx == 0 {
-				// "No Proxy (DIRECT)" — clear the node ref
-				t.cfg.SetSlotNodeRef(t.activeSlot, config.SlotNodeRef{})
-				t.view = slotsViewList
-				return t, t.saveAndMaybeRestart(t.activeSlot)
-			}
-			nodes := t.nodesForProxyPicker()
-			nodeIdx := idx - 1 // offset by 1 for the "No Proxy" row
-			if nodeIdx >= 0 && nodeIdx < len(nodes) {
-				node := nodes[nodeIdx]
-				t.cfg.SetSlotNodeRef(t.activeSlot, config.SlotNodeRef{
-					SubID:      t.proxySubID,
-					NodeName:   node.Name,
-					NodeServer: node.Server,
-					NodePort:   node.Port,
-					NodeType:   node.Type,
-				})
-				t.view = slotsViewList
-				return t, t.saveAndMaybeRestart(t.activeSlot)
 			}
 		}
 	}
@@ -397,11 +369,11 @@ func (t *SlotsTab) updateUpstreamPicker(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 
 // View renders the slots tab.
 func (t *SlotsTab) View() string {
-	t.refreshTables()
+	t.refreshUpstreamRows()
 
 	switch t.view {
 	case slotsViewProxyPicker:
-		return t.viewProxyPicker()
+		return t.viewNodeBrowser()
 	case slotsViewPortPicker:
 		return t.viewPortPicker()
 	case slotsViewManualPortInput:
@@ -491,24 +463,6 @@ func (t *SlotsTab) viewManualPortInput() string {
 	return styles.ContentArea.Render(strings.Join(lines, "\n"))
 }
 
-func (t *SlotsTab) viewProxyPicker() string {
-	title := slotLabel(i18n.M().Slots.SelectProxy, "Select Proxy")
-	lines := []string{styles.Title.Render(title)}
-	subTabs := t.renderProxySubTabs()
-	if subTabs != "" {
-		lines = append(lines, subTabs)
-	}
-	if hint := i18n.M().Slots.ProxyPickerHint; hint != "" {
-		lines = append(lines, styles.HelpText.Render(hint))
-	}
-	lines = append(lines, "", t.proxyList.View())
-	if t.message != "" {
-		lines = append(lines, "", t.renderMessage())
-	}
-	lines = append(lines, "", styles.HelpKey.Render("↑↓")+styles.HelpText.Render(" navigate  ")+styles.HelpKey.Render("←→")+styles.HelpText.Render(" sub  ")+styles.HelpKey.Render("Enter")+styles.HelpText.Render(" select  ")+styles.HelpKey.Render("Esc")+styles.HelpText.Render(" back"))
-	return styles.ContentArea.Render(strings.Join(lines, "\n"))
-}
-
 func (t *SlotsTab) viewUpstreamPicker() string {
 	title := slotLabel(i18n.M().Slots.SelectUpstream, "Select Upstream")
 	lines := []string{styles.Title.Render(title)}
@@ -521,54 +475,6 @@ func (t *SlotsTab) viewUpstreamPicker() string {
 	}
 	lines = append(lines, "", styles.HelpKey.Render("↑↓")+styles.HelpText.Render(" navigate  ")+styles.HelpKey.Render("Enter")+styles.HelpText.Render(" select  ")+styles.HelpKey.Render("Esc")+styles.HelpText.Render(" back"))
 	return styles.ContentArea.Render(strings.Join(lines, "\n"))
-}
-
-func (t *SlotsTab) refreshTables() {
-	t.refreshProxyRows()
-	t.refreshUpstreamRows()
-}
-
-func (t *SlotsTab) refreshProxyRows() {
-	nodes := t.nodesForProxyPicker()
-	rows := make([][]string, 0, len(nodes)+1)
-	ref, hasRef := t.cfg.GetSlotNodeRef(t.activeSlot)
-
-	// "No Proxy (DIRECT)" option at the top
-	noProxyIndicator := ""
-	if !hasRef {
-		noProxyIndicator = "●"
-	}
-	noProxyLabel := slotLabel(i18n.M().Slots.NoProxyOption, "No Proxy (DIRECT)")
-	rows = append(rows, []string{noProxyIndicator, noProxyLabel, "DIRECT"})
-
-	for _, n := range nodes {
-		indicator := ""
-		if slotNodeMatchesRef(ref, &n) {
-			indicator = "●"
-		}
-		rows = append(rows, []string{
-			indicator,
-			n.Name,
-			fmt.Sprintf("%s://%s:%d", n.Type, n.Server, n.Port),
-		})
-	}
-	t.proxyList.SetColumns(proxyTableColumns(t.width))
-	// Reserve lines for viewProxyPicker non-table elements:
-	// title(1) + hint(1) + empty(1) + table header(1) + separator(1)
-	// + scroll indicator(1) + empty(1) + help(1) = 8
-	reserved := 8
-	if len(t.sortedSubscriptions()) > 0 {
-		reserved += 2 // sub-tabs line + TabBar border
-	}
-	if t.message != "" {
-		reserved += 2 // empty line + message
-	}
-	height := t.height - reserved
-	if height < 3 {
-		height = 3
-	}
-	t.proxyList.SetHeight(height)
-	t.proxyList.SetRows(rows)
 }
 
 func (t *SlotsTab) refreshUpstreamRows() {
@@ -604,28 +510,68 @@ func (t *SlotsTab) refreshUpstreamRows() {
 
 func (t *SlotsTab) openProxyPicker() {
 	ref, ok := t.cfg.GetSlotNodeRef(t.activeSlot)
-	subs := t.sortedSubscriptions()
-	if ok && ref.SubID != "" {
-		t.proxySubID = ref.SubID
-	} else if len(subs) > 0 {
-		t.proxySubID = subs[0].ID
-	}
-	t.proxySubIndex = t.subscriptionIndex(t.proxySubID)
-	t.view = slotsViewProxyPicker
-	t.refreshProxyRows()
 
-	selected := 0 // default to "No Proxy (DIRECT)" row
-	if ok {
-		// A node ref exists; find the matching node (offset by 1 for the "No Proxy" row)
-		nodes := t.nodesForProxyPicker()
-		for i := range nodes {
-			if slotNodeMatchesRef(ref, &nodes[i]) {
-				selected = i + 1
-				break
-			}
+	// Determine which subscription to show.
+	subID := ""
+	if ok && ref.SubID != "" {
+		subID = ref.SubID
+	} else {
+		subs := t.sortedSubscriptionsForBrowser()
+		if len(subs) > 0 {
+			subID = subs[0].ID
 		}
 	}
-	t.proxyList.SetSelected(selected)
+
+	// Preselect the currently configured node.
+	var preselect *subscription.Node
+	if ok && ref.NodeServer != "" && ref.NodePort > 0 {
+		preselect = &subscription.Node{
+			Name:   ref.NodeName,
+			Server: ref.NodeServer,
+			Port:   ref.NodePort,
+		}
+	}
+
+	t.nodeBrowser.SetSize(t.width, t.height)
+	t.nodeBrowser.SetTitle(slotLabel(i18n.M().Slots.SelectProxy, "Select Proxy"))
+	t.nodeBrowser.SetAllowNoProxy(true)
+	t.nodeBrowser.Open(subID, preselect, components.PickMode)
+	t.view = slotsViewProxyPicker
+}
+
+func (t *SlotsTab) updateNodeBrowser(msg tea.Msg) (*SlotsTab, tea.Cmd) {
+	event, result, cmd := t.nodeBrowser.Update(msg)
+
+	switch event {
+	case components.EventSelected:
+		if result != nil {
+			// Check if user selected "no proxy" (empty node).
+			if result.Node.Server == "" && result.Node.Port == 0 && result.Node.Name == "" {
+				t.cfg.SetSlotNodeRef(t.activeSlot, config.SlotNodeRef{})
+			} else {
+				t.cfg.SetSlotNodeRef(t.activeSlot, config.SlotNodeRef{
+					SubID:      result.SubID,
+					NodeName:   result.Node.Name,
+					NodeServer: result.Node.Server,
+					NodePort:   result.Node.Port,
+					NodeType:   result.Node.Type,
+				})
+			}
+			t.nodeBrowser.Close()
+			t.view = slotsViewList
+			return t, t.saveAndMaybeRestart(t.activeSlot)
+		}
+	case components.EventClosed:
+		t.nodeBrowser.Close()
+		t.view = slotsViewList
+		return t, nil
+	}
+
+	return t, cmd
+}
+
+func (t *SlotsTab) viewNodeBrowser() string {
+	return t.nodeBrowser.View()
 }
 
 func (t *SlotsTab) prepareManualPortInput() {
@@ -638,7 +584,6 @@ func (t *SlotsTab) prepareManualPortInput() {
 	}
 	t.manualPortInput.SetCursor(len(t.manualPortInput.Value()))
 }
-
 
 func (t *SlotsTab) testAllSlotNodes() tea.Cmd {
 	var cmds []tea.Cmd
@@ -681,27 +626,9 @@ func (t *SlotsTab) saveAndMaybeRestart(slotID int) tea.Cmd {
 	return nil
 }
 
-func (t *SlotsTab) renderProxySubTabs() string {
-	subs := t.sortedSubscriptions()
-	if len(subs) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(subs))
-	for _, sub := range subs {
-		label := sub.Name
-		if subscription.IsCustomSubscription(sub) {
-			label = "📌 " + label
-		}
-		if sub.ID == t.proxySubID {
-			parts = append(parts, styles.ActiveTab.Render(label))
-		} else {
-			parts = append(parts, styles.InactiveTab.Render(label))
-		}
-	}
-	return styles.TabBar.Width(t.width).Render(lipgloss.JoinHorizontal(lipgloss.Top, parts...))
-}
+// renderProxySubTabs removed — NodeBrowser renders its own sub-tabs
 
-func (t *SlotsTab) sortedSubscriptions() []*subscription.Subscription {
+func (t *SlotsTab) sortedSubscriptionsForBrowser() []*subscription.Subscription {
 	if t.subManager == nil {
 		return nil
 	}
@@ -725,37 +652,6 @@ func (t *SlotsTab) sortedSubscriptions() []*subscription.Subscription {
 		}
 	}
 	return out
-}
-
-func (t *SlotsTab) subscriptionIndex(subID string) int {
-	subs := t.sortedSubscriptions()
-	for i, sub := range subs {
-		if sub != nil && sub.ID == subID {
-			return i
-		}
-	}
-	return 0
-}
-
-func (t *SlotsTab) switchProxySubscription(delta int) {
-	subs := t.sortedSubscriptions()
-	if len(subs) == 0 {
-		t.proxySubID = ""
-		return
-	}
-	idx := t.subscriptionIndex(t.proxySubID)
-	idx = (idx + delta + len(subs)) % len(subs)
-	t.proxySubIndex = idx
-	t.proxySubID = subs[idx].ID
-	t.refreshProxyRows()
-	t.proxyList.SetSelected(0)
-}
-
-func (t *SlotsTab) nodesForProxyPicker() []subscription.Node {
-	if t.subManager == nil || strings.TrimSpace(t.proxySubID) == "" {
-		return nil
-	}
-	return t.subManager.GetNodesForSubscription(t.proxySubID)
 }
 
 func (t *SlotsTab) selectedSlotID() int {
@@ -861,19 +757,6 @@ func (t *SlotsTab) setMessage(message string, messageType string) {
 	t.messageType = messageType
 }
 
-func slotNodeMatchesRef(ref config.SlotNodeRef, node *subscription.Node) bool {
-	if node == nil {
-		return false
-	}
-	if ref.NodeServer != "" && ref.NodePort > 0 {
-		return ref.NodeServer == node.Server && ref.NodePort == node.Port
-	}
-	if ref.NodeName != "" {
-		return ref.NodeName == node.Name
-	}
-	return false
-}
-
 func slotModeTitle(mode string) string {
 	if strings.EqualFold(mode, "global") {
 		return "Global"
@@ -900,22 +783,6 @@ func formatSlotMessage(format string, slotID int, fallback string) string {
 		return fallback
 	}
 	return fmt.Sprintf(format, slotID)
-}
-
-func proxyTableColumns(width int) []components.Column {
-	if width < 60 {
-		width = 60
-	}
-	detailW := 28
-	nameW := width - 4 - detailW
-	if nameW < 16 {
-		nameW = 16
-	}
-	return []components.Column{
-		{Title: "", Width: 4},
-		{Title: "Name", Width: nameW},
-		{Title: "Detail", Width: detailW},
-	}
 }
 
 func upstreamTableColumns(width int) []components.Column {
@@ -1024,11 +891,11 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int, selected bool) stri
 	}
 
 	const indicatorPad = 3 // "▶  " or "   " — 3 chars
-	const borderW = 2                          // left+right border chars
-	const padW = 2                            // left+right padding chars
+	const borderW = 2      // left+right border chars
+	const padW = 2         // left+right padding chars
 
 	boxWidth := cardWidth - indicatorPad - borderW // content width passed to lipgloss (border added on top)
-	innerWidth := boxWidth - padW                   // text area after padding removed
+	innerWidth := boxWidth - padW                  // text area after padding removed
 	if innerWidth < 10 {
 		innerWidth = 10
 	}

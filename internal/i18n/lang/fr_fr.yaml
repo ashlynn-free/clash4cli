@@ -57,7 +57,7 @@ settings:
   socks_port: "Port SOCKS5"
   http_port: "Port HTTP"
   allow_lan: "Autoriser les connexions LAN"
-  tun: "TUN mode (Linux)"
+  tun: "TUN mode (Main slot only)"
   docker_tcp: "Docker hijack (TCP, Linux)"
   language: "Langue"
   concurrent: "Tests simultanés"

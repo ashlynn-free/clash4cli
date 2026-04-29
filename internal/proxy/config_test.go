@@ -64,15 +64,33 @@ func TestGenerateConfig_ProxyGroupsOrder(t *testing.T) {
 		t.Fatalf("unexpected Rules: %#v", m.Rules)
 	}
 
-	// Linux-only: TUN should be present only when enabled and on linux.
+	// TUN should be present on linux and darwin when enabled.
 	cfg.Proxy.TunEnabled = true
 	m2, err := GenerateConfig(nodes, selected, cfg, 0, 12345, 19090, "127.0.0.1", 0)
 	if err != nil {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 		if m2.Tun == nil || !m2.Tun.Enable {
-			t.Fatalf("expected Tun enabled on linux when cfg.Proxy.TunEnabled=true, got %#v", m2.Tun)
+			t.Fatalf("expected Tun enabled on %s when cfg.Proxy.TunEnabled=true, got %#v", runtime.GOOS, m2.Tun)
+		}
+		wantStack := "system"
+		if runtime.GOOS == "darwin" {
+			wantStack = "mixed"
+		}
+		if m2.Tun.Stack != wantStack {
+			t.Fatalf("expected Tun.Stack=%q on %s, got %q", wantStack, runtime.GOOS, m2.Tun.Stack)
+		}
+		if runtime.GOOS == "darwin" && m2.Tun.Device != "" {
+			t.Fatalf("expected Tun.Device empty on darwin, got %q", m2.Tun.Device)
+		}
+
+		m3, err := GenerateConfig(nodes, selected, cfg, 1, 12346, 19091, "127.0.0.1", 0)
+		if err != nil {
+			t.Fatalf("GenerateConfig for slot 1: %v", err)
+		}
+		if m3.Tun != nil {
+			t.Fatalf("expected Tun nil on non-zero slot, got %#v", m3.Tun)
 		}
 	} else {
 		if m2.Tun != nil {

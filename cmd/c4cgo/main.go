@@ -599,6 +599,16 @@ func findProxychainsLib(binaryPath, libName string, getenv func(string) string, 
 }
 
 // firstLine returns the first non-empty line of s, or "" if s is empty.
+func shouldFallbackToEnv(stderr string) bool {
+	text := strings.ToLower(stderr)
+	if !strings.Contains(text, "libproxychains4") {
+		return false
+	}
+	return strings.Contains(text, "glibc_") ||
+		strings.Contains(text, "cannot open shared object file") ||
+		strings.Contains(text, "wrong elf class")
+}
+
 func firstLine(s string) string {
 	for _, line := range strings.Split(s, "\n") {
 		if strings.TrimSpace(line) != "" {
@@ -664,7 +674,7 @@ socks5 %s %d
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	var stderrBuf bytes.Buffer
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stderr = io.MultiWriter(newProxychainsBannerFilter(os.Stderr), &stderrBuf)
 	cmd.Env = env
 
 	err := cmd.Run()
@@ -730,4 +740,36 @@ func isSIPProtectedDarwinPath(p string) bool {
 		}
 	}
 	return false
+}
+
+// proxychainsBannerFilter wraps an io.Writer and suppresses the
+// "[proxychains] DLL init: proxychains-ng ..." banner line that
+// the shared library prints on startup (before quiet_mode takes effect).
+type proxychainsBannerFilter struct {
+	inner io.Writer
+}
+
+func newProxychainsBannerFilter(w io.Writer) *proxychainsBannerFilter {
+	return &proxychainsBannerFilter{inner: w}
+}
+
+func (f *proxychainsBannerFilter) Write(p []byte) (int, error) {
+	n := len(p)
+	// Fast path: if the chunk doesn't contain the banner prefix, pass through.
+	if !bytes.Contains(p, []byte("[proxychains] DLL init")) {
+		f.inner.Write(p)
+		return n, nil
+	}
+	// Filter out lines containing the banner.
+	var filtered []byte
+	for _, line := range bytes.SplitAfter(p, []byte("\n")) {
+		if bytes.Contains(line, []byte("[proxychains] DLL init")) {
+			continue
+		}
+		filtered = append(filtered, line...)
+	}
+	if len(filtered) > 0 {
+		f.inner.Write(filtered)
+	}
+	return n, nil
 }

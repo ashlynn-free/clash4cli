@@ -69,6 +69,24 @@ func normalizeProxyMode(mode string) string {
 	}
 }
 
+func stringSliceToAnySlice(values []string) []any {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]any, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func appendUnique(values []string, items ...string) []string {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -129,12 +147,28 @@ func GenerateConfigWithMode(nodes []subscription.Node, selectedNode *subscriptio
 		},
 	}
 
-	if cfg != nil && cfg.Proxy.TunEnabled && runtime.GOOS == "linux" {
+	if cfg != nil && cfg.Proxy.TunEnabled && slotID == 0 && (runtime.GOOS == "linux" || runtime.GOOS == "darwin") {
+		stack := cfg.Proxy.TunStack
+		if stack == "" {
+			if runtime.GOOS == "darwin" {
+				stack = "mixed"
+			} else {
+				stack = "system"
+			}
+		}
 		mihomoConfig.Tun = &TunConfig{
 			Enable:          true,
-			Stack:           "system",
-			AutoRoute:       true,
-			AutoDetectIface: true,
+			Stack:           stack,
+			AutoRoute:       cfg.Proxy.TunAutoRoute,
+			AutoDetectIface: cfg.Proxy.TunAutoDetectInterface,
+			StrictRoute:     cfg.Proxy.TunStrictRoute,
+			MTU:             cfg.Proxy.TunMTU,
+			Device:          cfg.Proxy.TunDevice,
+			DNSHijack:       stringSliceToAnySlice(cfg.Proxy.TunDNSHijack),
+			RouteExcludeSet: stringSliceToAnySlice(cfg.Proxy.TunRouteExcludeAddress),
+		}
+		if runtime.GOOS == "darwin" {
+			mihomoConfig.Tun.Device = ""
 		}
 	}
 

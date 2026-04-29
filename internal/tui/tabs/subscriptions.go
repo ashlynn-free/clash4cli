@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"rocket4cli/internal/i18n"
+	"rocket4cli/internal/node"
 	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 	"rocket4cli/internal/tui/components"
@@ -64,15 +65,18 @@ const (
 
 // SubscriptionsTab represents the subscriptions tab
 type SubscriptionsTab struct {
-	table       *components.Table
-	customTable *components.Table
-	subManager  *subscription.Manager
-	slotMgr     *proxy.SlotManager
-	subs        []*subscription.Subscription
-	customNodes []subscription.Node
-	width       int
-	height      int
-	activeSubID string
+	table           *components.Table
+	customTable     *components.Table
+	subManager      *subscription.Manager
+	slotMgr         *proxy.SlotManager
+	subs            []*subscription.Subscription
+	customNodes     []subscription.Node
+	nodeMgr         *node.Manager
+	nodeBrowser     *components.NodeBrowser
+	showNodeBrowser bool
+	width           int
+	height          int
+	activeSubID     string
 
 	inputMode    InputMode
 	urlInput     textinput.Model
@@ -92,7 +96,7 @@ type SubscriptionsTab struct {
 }
 
 // NewSubscriptionsTab creates a new subscriptions tab
-func NewSubscriptionsTab(subMgr *subscription.Manager, slotMgr *proxy.SlotManager) *SubscriptionsTab {
+func NewSubscriptionsTab(subMgr *subscription.Manager, slotMgr *proxy.SlotManager, nodeMgr *node.Manager) *SubscriptionsTab {
 	columns := []components.Column{
 		{Title: "Name", Width: 25},
 		{Title: "Nodes", Width: 8},
@@ -126,6 +130,8 @@ func NewSubscriptionsTab(subMgr *subscription.Manager, slotMgr *proxy.SlotManage
 		customTable:    components.NewTable(customColumns),
 		subManager:     subMgr,
 		slotMgr:        slotMgr,
+		nodeMgr:        nodeMgr,
+		nodeBrowser:    components.NewNodeBrowser(nil, nodeMgr, subMgr),
 		urlInput:       urlInput,
 		nameInput:      nameInput,
 		contentInput:   contentInput,
@@ -140,7 +146,7 @@ func (t *SubscriptionsTab) Init() tea.Cmd {
 
 // BlocksGlobalKeys returns true when this tab has an active overlay/input state.
 func (t *SubscriptionsTab) BlocksGlobalKeys() bool {
-	return t.inputMode != InputModeNone || t.showCustomManager
+	return t.inputMode != InputModeNone || t.showCustomManager || t.showNodeBrowser
 }
 
 // Update handles messages
@@ -149,6 +155,15 @@ func (t *SubscriptionsTab) Update(msg tea.Msg) (*SubscriptionsTab, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if t.showNodeBrowser {
+			event, _, cmd := t.nodeBrowser.Update(msg)
+			if event == components.EventClosed {
+				t.nodeBrowser.Close()
+				t.showNodeBrowser = false
+				return t, nil
+			}
+			return t, cmd
+		}
 		if t.showCustomManager {
 			if t.customInputMode != customInputNone {
 				return t.handleCustomInputMode(msg)
@@ -164,6 +179,16 @@ func (t *SubscriptionsTab) Update(msg tea.Msg) (*SubscriptionsTab, tea.Cmd) {
 			t.table.MoveUp()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
 			t.table.MoveDown()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			sub := t.selectedSubscription()
+			if sub != nil {
+				t.nodeBrowser.SetSize(t.width, t.height)
+				t.nodeBrowser.SetTitle(sub.Name)
+				t.nodeBrowser.SetAllowNoProxy(false)
+				t.nodeBrowser.Open(sub.ID, nil, components.BrowseMode)
+				t.showNodeBrowser = true
+				return t, nil
+			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 			t.inputMode = InputModeURL
 			t.urlInput.Focus()
@@ -367,6 +392,10 @@ func (t *SubscriptionsTab) handleCustomInputMode(msg tea.KeyMsg) (*Subscriptions
 func (t *SubscriptionsTab) View() string {
 	m := i18n.M()
 
+	if t.showNodeBrowser {
+		return t.nodeBrowser.View()
+	}
+
 	if t.showCustomManager {
 		if t.customInputMode != customInputNone {
 			return t.renderCustomInputMode()
@@ -486,6 +515,7 @@ func (t *SubscriptionsTab) renderCustomInputMode() string {
 func (t *SubscriptionsTab) SetSize(width, height int) {
 	t.width = width
 	t.height = height
+	t.nodeBrowser.SetSize(width, height)
 	t.urlInput.Width = width - 10
 	t.nameInput.Width = width - 10
 
@@ -655,6 +685,20 @@ func (t *SubscriptionsTab) preselectCustomNode(node *subscription.Node) {
 			t.customTable.SetSelected(i)
 			return
 		}
+	}
+}
+
+// SetNodeBrowserIndicators forwards slot indicators to the embedded browser.
+func (t *SubscriptionsTab) SetNodeBrowserIndicators(indicators map[string]components.SlotIndicator) {
+	if t.nodeBrowser != nil {
+		t.nodeBrowser.SetSlotIndicators(indicators)
+	}
+}
+
+// SetNodeBrowserTraffic forwards per-node traffic strings to the embedded browser.
+func (t *SubscriptionsTab) SetNodeBrowserTraffic(traffic map[string]string) {
+	if t.nodeBrowser != nil {
+		t.nodeBrowser.SetSlotTraffic(traffic)
 	}
 }
 

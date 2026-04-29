@@ -63,14 +63,23 @@ func TestLoad_Save_RoundTrip(t *testing.T) {
 	})
 	cfg.SetSlotStartMode(2, "global")
 	cfg.SetSlotManualMixedPort(2, 21090)
-	cfg.SetSlotUpstream(2, UpstreamProxyConfig{
-		Enabled:  true,
-		Protocol: "https",
-		Server:   "gateway.example.com",
-		Port:     443,
-		Username: "alice",
-		Password: "secret",
-	})
+	cfg.Proxy.SystemProxy = SystemProxyConfig{
+		Enabled:                true,
+		Host:                   "127.0.0.1",
+		Port:                   17890,
+		PACMode:                true,
+		ProxyGuard:             true,
+		GuardDurationSeconds:   45,
+		AlwaysUseDefaultBypass: true,
+		ValidateBypassFormat:   true,
+		Bypass:                 []string{"127.0.0.1", "localhost", "*.local"},
+	}
+	cfg.Proxy.TunStack = "gvisor"
+	cfg.Proxy.TunMTU = 9000
+	cfg.Proxy.TunDevice = "utun999"
+	cfg.Proxy.TunStrictRoute = true
+	cfg.Proxy.TunDNSHijack = []string{"any:53"}
+	cfg.Proxy.TunRouteExcludeAddress = []string{"192.168.0.0/16"}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -104,12 +113,20 @@ func TestLoad_Save_RoundTrip(t *testing.T) {
 	}
 	// After reload, the inline upstream is migrated to the registry.
 	// EffectiveUpstreamForSlot should still resolve it.
-	upstream, ok := cfg2.EffectiveUpstreamForSlot(2)
-	if !ok {
-		t.Fatalf("expected slot 2 upstream config to persist via registry")
+	if cfg2.Proxy.SystemProxy.Host != "127.0.0.1" || cfg2.Proxy.SystemProxy.Port != 17890 || !cfg2.Proxy.SystemProxy.Enabled {
+		t.Fatalf("unexpected system proxy config after reload: %#v", cfg2.Proxy.SystemProxy)
 	}
-	if upstream.Protocol != "https" || upstream.Server != "gateway.example.com" || upstream.Port != 443 {
-		t.Fatalf("unexpected upstream config after reload: %#v", upstream)
+	if !cfg2.Proxy.SystemProxy.PACMode || !cfg2.Proxy.SystemProxy.ProxyGuard || cfg2.Proxy.SystemProxy.GuardDurationSeconds != 45 {
+		t.Fatalf("unexpected system proxy flags after reload: %#v", cfg2.Proxy.SystemProxy)
+	}
+	if len(cfg2.Proxy.SystemProxy.Bypass) != 3 {
+		t.Fatalf("expected bypass list to persist, got %#v", cfg2.Proxy.SystemProxy.Bypass)
+	}
+	if cfg2.Proxy.TunStack != "gvisor" || cfg2.Proxy.TunMTU != 9000 || cfg2.Proxy.TunDevice != "utun999" {
+		t.Fatalf("unexpected tun config after reload: stack=%q mtu=%d device=%q", cfg2.Proxy.TunStack, cfg2.Proxy.TunMTU, cfg2.Proxy.TunDevice)
+	}
+	if !cfg2.Proxy.TunStrictRoute || len(cfg2.Proxy.TunDNSHijack) != 1 || len(cfg2.Proxy.TunRouteExcludeAddress) != 1 {
+		t.Fatalf("unexpected tun advanced fields after reload: %#v", cfg2.Proxy)
 	}
 }
 

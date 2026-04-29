@@ -15,6 +15,7 @@ import (
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/logger"
+	"rocket4cli/internal/netctl"
 	"rocket4cli/internal/node"
 	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
@@ -127,7 +128,7 @@ func New(version string) (*App, error) {
 	})
 
 	startupWarn := ""
-	if runtime.GOOS == "linux" && os.Geteuid() != 0 && cfg != nil && (cfg.Proxy.TunEnabled || cfg.Proxy.DockerRedirectTCP) {
+	if os.Geteuid() != 0 && cfg != nil && ((runtime.GOOS == "darwin" && cfg.Proxy.TunEnabled) || (runtime.GOOS == "linux" && (cfg.Proxy.TunEnabled || cfg.Proxy.DockerRedirectTCP))) {
 		var features []string
 		if cfg.Proxy.TunEnabled {
 			features = append(features, "TUN")
@@ -188,6 +189,18 @@ func (a *App) Run() error {
 // Cleanup performs cleanup on shutdown
 func (a *App) Cleanup() {
 	logger.Info("clash4cli shutting down")
+
+	if runtime.GOOS == "darwin" {
+		snapshot, err := netctl.LoadSystemProxySnapshot()
+		if err == nil && snapshot != nil {
+			if err := netctl.RestoreSystemProxy(snapshot); err != nil {
+				logger.Warn("failed to restore system proxy: %v", err)
+			} else {
+				_ = netctl.ClearSystemProxySnapshot()
+			}
+		}
+	}
+
 	logger.Close()
 	if a.lock != nil {
 		a.lock.release()

@@ -24,8 +24,7 @@ import (
 type Tab int
 
 const (
-	TabNodes Tab = iota
-	TabSlots
+	TabSlots Tab = iota
 	TabSubscriptions
 	TabSettings
 	TabLogs
@@ -68,7 +67,6 @@ type Model struct {
 	startupWarning string
 	showSplash     bool
 	activeSubID    string
-	subTabIdx      int
 	selectedNode   *subscription.Node
 	overlayText    string
 	overlayID      int
@@ -79,7 +77,6 @@ type Model struct {
 	statusBar *components.StatusBar
 
 	// Tabs
-	nodesTab    *tabs.NodesTab
 	slotsTab    *tabs.SlotsTab
 	subsTab     *tabs.SubscriptionsTab
 	settingsTab *tabs.SettingsTab
@@ -101,9 +98,8 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		nodeMgr:         nodeMgr,
 		slotMgr:         slotMgr,
 		statusBar:       components.NewStatusBar(),
-		nodesTab:        tabs.NewNodesTab(nodeMgr),
 		slotsTab:        tabs.NewSlotsTab(cfg, subMgr, slotMgr, nodeMgr),
-		subsTab:         tabs.NewSubscriptionsTab(subMgr, slotMgr),
+		subsTab:         tabs.NewSubscriptionsTab(subMgr, slotMgr, nodeMgr),
 		settingsTab:     tabs.NewSettingsTab(cfg, slotMgr, version),
 		logsTab:         tabs.NewLogsTab(),
 		version:         strings.TrimSpace(version),
@@ -111,15 +107,8 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		slotTrafficLast: make(map[int]trafficSnapshot),
 	}
 
-	if m.nodesTab != nil {
-		m.nodesTab.SetServerDisplay(cfg.UI.ServerDisplay)
-	}
-
 	if cfg != nil && cfg.UI.ActiveSubscriptionID != "" {
 		m.activeSubID = cfg.UI.ActiveSubscriptionID
-		if m.nodesTab != nil {
-			m.nodesTab.SetSubscriptionID(m.activeSubID)
-		}
 		if m.subsTab != nil {
 			m.subsTab.SetActiveSubscription(m.activeSubID)
 		}
@@ -278,9 +267,6 @@ func (m *Model) restoreSelectionFromConfig() {
 	if m.statusBar != nil {
 		m.statusBar.SetSelectedNode(selected)
 	}
-	if m.nodesTab != nil {
-		m.nodesTab.SetPreselect(selected)
-	}
 }
 
 func (m *Model) restoreStateFromProxyLock() {
@@ -301,9 +287,6 @@ func (m *Model) restoreStateFromProxyLock() {
 	first := activeSlots[0]
 	if first.SubID != "" {
 		m.activeSubID = first.SubID
-		if m.nodesTab != nil {
-			m.nodesTab.SetSubscriptionID(first.SubID)
-		}
 		if m.subsTab != nil {
 			m.subsTab.SetActiveSubscription(first.SubID)
 		}
@@ -317,9 +300,6 @@ func (m *Model) restoreStateFromProxyLock() {
 				m.selectedNode = &nodes[i]
 				m.nodeMgr.Select(m.selectedNode)
 				m.statusBar.SetSelectedNode(m.selectedNode)
-				if m.nodesTab != nil {
-					m.nodesTab.SetPreselect(m.selectedNode)
-				}
 				break
 			}
 		}
@@ -416,7 +396,6 @@ func findNodeInSubscription(sub *subscription.Subscription, lock *proxy.LockFile
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.nodesTab.Init(),
 		m.slotsTab.Init(),
 		m.subsTab.Init(),
 		m.settingsTab.Init(),
@@ -467,10 +446,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Let tabs with active overlays/forms consume keys before global shortcuts.
-		nodeOverlay := m.activeTab == TabNodes && m.nodesTab != nil && m.nodesTab.InDetailView()
 		slotsOverlay := m.activeTab == TabSlots && m.slotsTab != nil && m.slotsTab.BlocksGlobalKeys()
 		subOverlay := m.activeTab == TabSubscriptions && m.subsTab != nil && m.subsTab.BlocksGlobalKeys()
-		blockGlobal := nodeOverlay || slotsOverlay || subOverlay
+		blockGlobal := slotsOverlay || subOverlay
 
 		// Global keys
 		switch {
@@ -486,18 +464,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case m.activeTab == TabNodes && !blockGlobal && key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			return m, m.handleNodesEnterForSlot0()
-
-		case m.activeTab == TabNodes && !blockGlobal && key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
-			return m, m.switchSubscription(-1)
-
-		case m.activeTab == TabNodes && !blockGlobal && key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
-			return m, m.switchSubscription(1)
-
-		case m.activeTab == TabNodes && !blockGlobal && key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
-			m.disconnectAllSlots()
-			return m, tea.Batch(m.nodesTab.Init())
+		case key.Matches(msg, key.NewBinding(key.WithKeys("1"))):
+			if !blockGlobal {
+				m.setTab(TabSlots)
+				return m, nil
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("2"))):
+			if !blockGlobal {
+				m.setTab(TabSubscriptions)
+				return m, nil
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("3"))):
+			if !blockGlobal {
+				m.setTab(TabSettings)
+				return m, nil
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("4"))):
+			if !blockGlobal {
+				m.setTab(TabLogs)
+				return m, nil
+			}
 		}
 
 	case tea.MouseMsg:
@@ -534,71 +520,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showSplash = false
 		cmds = append(cmds, m.showStartupWarningOverlay())
 
-	case tabs.NodeSelectedMsg:
-		m.selectedNode = msg.Node
-		m.statusBar.SetSelectedNode(msg.Node)
-		if m.nodesTab != nil {
-			m.nodesTab.SetPreselect(msg.Node)
-		}
-		m.logsTab.AddLog("info", fmt.Sprintf("Selected node: %s", msg.Node.Name))
-		cmds = append(cmds, m.persistSelectedNode(m.activeSubID, msg.Node))
-
 	case tabs.SubscriptionAddedMsg:
-		// Refresh nodes when subscription is added
 		m.logsTab.AddLog("info", fmt.Sprintf("Subscription added: %s", msg.Sub.Name))
-		cmds = append(cmds, m.nodesTab.Init())
-		// Also refresh subscriptions tab
 		var cmd tea.Cmd
 		m.subsTab, cmd = m.subsTab.Update(msg)
 		cmds = append(cmds, cmd)
 
 	case tabs.SubscriptionUpdatedMsg:
-		// Refresh nodes when subscriptions are updated
 		m.logsTab.AddLog("info", "Subscriptions updated")
-		cmds = append(cmds, m.nodesTab.Init())
 
 	case tabs.CustomNodesChangedMsg:
-		cmds = append(cmds, m.nodesTab.Init())
 		m.updateSlotIndicators()
 		m.updateStatusBar()
 		if m.activeSubID == subscription.CustomSubscriptionID {
 			m.selectedNode = msg.SelectedNode
 			m.nodeMgr.Select(msg.SelectedNode)
 			m.statusBar.SetSelectedNode(msg.SelectedNode)
-			if m.nodesTab != nil && msg.SelectedNode != nil {
-				m.nodesTab.SetPreselect(msg.SelectedNode)
-			}
 			if msg.SelectedNode != nil {
 				cmds = append(cmds, m.persistSelectedNode(m.activeSubID, msg.SelectedNode))
 			}
 		}
 
-	case tabs.NodesRefreshedMsg:
-		// Always forward NodesRefreshedMsg to nodes tab regardless of active tab
-		m.nodesTab, _ = m.nodesTab.Update(msg)
-
 	case tabs.SubsRefreshedMsg:
 		prevActive := m.activeSubID
-
-		// Ensure we have an active subscription (for Nodes filtering).
 		newActive := m.activeSubID
-		newSubTabIdx := m.subTabIdx
 		if len(msg.Subs) == 0 {
 			newActive = ""
-			newSubTabIdx = 0
 		} else {
 			valid := false
-			for i, sub := range msg.Subs {
+			for _, sub := range msg.Subs {
 				if sub != nil && sub.ID == m.activeSubID {
 					valid = true
-					newSubTabIdx = i
 					break
 				}
 			}
 			if newActive == "" || !valid {
-				newSubTabIdx = preferredSubscriptionIndex(msg.Subs)
-				if msg.Subs[newSubTabIdx] != nil {
-					newActive = msg.Subs[newSubTabIdx].ID
+				idx := preferredSubscriptionIndex(msg.Subs)
+				if idx >= 0 && idx < len(msg.Subs) && msg.Subs[idx] != nil {
+					newActive = msg.Subs[idx].ID
 				} else {
 					newActive = ""
 				}
@@ -611,25 +570,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusBar.SetSelectedNode(nil)
 		}
 		m.activeSubID = newActive
-		m.subTabIdx = newSubTabIdx
 		cmds = append(cmds, m.persistActiveSubscription(m.activeSubID))
 
-		if m.nodesTab != nil {
-			m.nodesTab.SetSubscriptionID(m.activeSubID)
-			cmds = append(cmds, m.nodesTab.Init())
-		}
-
-		// Always forward SubsRefreshedMsg to subscriptions tab regardless of active tab
 		m.subsTab, _ = m.subsTab.Update(msg)
 		if m.subsTab != nil {
 			m.subsTab.SetActiveSubscription(m.activeSubID)
 		}
 
 	case tabs.SettingsSavedMsg:
-		// Apply settings that affect other tabs immediately.
-		if m.nodesTab != nil {
-			m.nodesTab.SetServerDisplay(m.cfg.UI.ServerDisplay)
-		}
 		if m.subManager != nil {
 			m.subManager.SetUpdateViaProxy(m.cfg.Subscription.UpdateViaProxy)
 		}
@@ -750,9 +698,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusBar.SetActiveSlots(m.slotMgr.ActiveSlotCount())
 		}
 
-		// Update node traffic display
-		if m.nodesTab != nil {
-			m.nodesTab.SetSlotTraffic(nodeTraffic)
+		// Update node traffic display in embedded browsers.
+		if m.slotsTab != nil {
+			m.slotsTab.SetNodeBrowserTraffic(nodeTraffic)
+		}
+		if m.subsTab != nil {
+			m.subsTab.SetNodeBrowserTraffic(nodeTraffic)
 		}
 
 	case slotActionDoneMsg:
@@ -769,16 +720,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.updateSlotIndicators()
 		m.updateStatusBar()
-		if m.nodesTab != nil {
-			m.nodesTab.RestoreCursor()
-		}
 	}
 
 	// Update active tab
 	var cmd tea.Cmd
 	switch m.activeTab {
-	case TabNodes:
-		m.nodesTab, cmd = m.nodesTab.Update(msg)
 	case TabSlots:
 		wasFullScreen := m.slotsTab.IsFullScreen()
 		m.slotsTab, cmd = m.slotsTab.Update(msg)
@@ -871,14 +817,13 @@ func (m *Model) View() string {
 func (m *Model) renderTabBar() string {
 	msgs := i18n.M()
 	tabNames := []string{
-		msgs.Tabs.Nodes,
-		msgs.Tabs.Slots,
-		msgs.Tabs.Subscription,
-		msgs.Tabs.Settings,
-		msgs.Tabs.Logs,
+		"1 " + msgs.Tabs.Slots,
+		"2 " + msgs.Tabs.Subscription,
+		"3 " + msgs.Tabs.Settings,
+		"4 " + msgs.Tabs.Logs,
 	}
-	if strings.TrimSpace(tabNames[1]) == "" {
-		tabNames[1] = "Slots"
+	if strings.TrimSpace(tabNames[0]) == "" {
+		tabNames[0] = "Slots"
 	}
 
 	type renderedTab struct {
@@ -984,14 +929,13 @@ func (m *Model) renderTabBar() string {
 func (m *Model) tabHitTest(x int) (Tab, bool) {
 	msgs := i18n.M()
 	tabNames := []string{
-		msgs.Tabs.Nodes,
-		msgs.Tabs.Slots,
-		msgs.Tabs.Subscription,
-		msgs.Tabs.Settings,
-		msgs.Tabs.Logs,
+		"1 " + msgs.Tabs.Slots,
+		"2 " + msgs.Tabs.Subscription,
+		"3 " + msgs.Tabs.Settings,
+		"4 " + msgs.Tabs.Logs,
 	}
-	if strings.TrimSpace(tabNames[1]) == "" {
-		tabNames[1] = "Slots"
+	if strings.TrimSpace(tabNames[0]) == "" {
+		tabNames[0] = "Slots"
 	}
 
 	prefix := styles.HelpText.Render(msgs.Actions.Tab + "： ")
@@ -1012,154 +956,8 @@ func (m *Model) tabHitTest(x int) (Tab, bool) {
 	}
 	return 0, false
 }
-
-// renderSubTabs renders subscription sub-tabs for the Nodes page.
-// It performs horizontal scrolling so the tab bar always fits in one line.
-func (m *Model) renderSubTabs() string {
-	subs := m.subManager.List()
-	sortSubscriptionsByNameAndID(subs)
-	if len(subs) == 0 {
-		return ""
-	}
-
-	// Find the index of the currently active subscription by ID
-	activeIdx := 0
-	if m.activeSubID != "" {
-		for i, sub := range subs {
-			if sub != nil && sub.ID == m.activeSubID {
-				activeIdx = i
-				break
-			}
-		}
-	}
-
-	// Pre-render every tab label so we can measure widths.
-	type renderedTab struct {
-		text  string
-		width int
-	}
-	rendered := make([]renderedTab, 0, len(subs))
-	for i, sub := range subs {
-		if sub == nil {
-			continue
-		}
-		label := sub.Name
-		if subscription.IsCustomSubscription(sub) {
-			label = "📌 " + label
-		}
-		var text string
-		if i == activeIdx {
-			text = styles.ActiveTab.Render(label)
-		} else {
-			text = styles.InactiveTab.Render(label)
-		}
-		rendered = append(rendered, renderedTab{text: text, width: lipgloss.Width(text)})
-	}
-
-	if len(rendered) == 0 {
-		return ""
-	}
-
-	// Available width for tabs (reserve space for possible ← / → indicators).
-	const arrowWidth = 2 // "← " or " →"
-	maxWidth := m.width
-	if maxWidth < 1 {
-		maxWidth = 80
-	}
-
-	// Determine the visible window of tabs that fits within maxWidth,
-	// ensuring the active tab is always visible.
-	// Map activeIdx to the rendered slice index (skip nil subs).
-	activeRendered := 0
-	{
-		j := 0
-		for i, sub := range subs {
-			if sub == nil {
-				continue
-			}
-			if i == activeIdx {
-				activeRendered = j
-				break
-			}
-			j++
-		}
-	}
-
-	// Start with the active tab and expand outward.
-	startIdx := activeRendered
-	endIdx := activeRendered // inclusive
-	usedWidth := rendered[activeRendered].width
-
-	for {
-		expanded := false
-		// Try expanding left
-		if startIdx > 0 {
-			need := rendered[startIdx-1].width
-			extra := 0
-			if startIdx-1 > 0 {
-				extra = arrowWidth // will need "← " indicator
-			}
-			if endIdx < len(rendered)-1 {
-				extra = max(extra, arrowWidth) // already have " →"
-			}
-			if usedWidth+need+extra <= maxWidth {
-				startIdx--
-				usedWidth += need
-				expanded = true
-			}
-		}
-		// Try expanding right
-		if endIdx < len(rendered)-1 {
-			need := rendered[endIdx+1].width
-			extra := 0
-			if endIdx+1 < len(rendered)-1 {
-				extra = arrowWidth
-			}
-			if startIdx > 0 {
-				extra = max(extra, arrowWidth)
-			}
-			if usedWidth+need+extra <= maxWidth {
-				endIdx++
-				usedWidth += need
-				expanded = true
-			}
-		}
-		if !expanded {
-			break
-		}
-	}
-
-	// Build the visible tab bar.
-	msgs := i18n.M()
-	prefix := styles.HelpText.Render(msgs.Actions.LrSwitch + "： ")
-	var parts []string
-	parts = append(parts, prefix)
-	if startIdx > 0 {
-		parts = append(parts, styles.Muted.Render("◀ "))
-	}
-	for i := startIdx; i <= endIdx; i++ {
-		parts = append(parts, rendered[i].text)
-	}
-	if endIdx < len(rendered)-1 {
-		parts = append(parts, styles.Muted.Render(" ▶"))
-	}
-
-	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
-	return styles.TabBar.Width(m.width).Render(tabBar)
-}
-
 func (m *Model) renderActiveTab() string {
 	switch m.activeTab {
-	case TabNodes:
-		subTabs := ""
-		if m.nodesTab == nil || !m.nodesTab.InDetailView() {
-			subTabs = m.renderSubTabs()
-		}
-		nodesView := m.nodesTab.View()
-		if subTabs != "" {
-			return subTabs + "\n" + nodesView
-		}
-		return nodesView
 	case TabSlots:
 		return m.slotsTab.View()
 	case TabSubscriptions:
@@ -1174,27 +972,18 @@ func (m *Model) renderActiveTab() string {
 }
 
 func (m *Model) nextTab() {
-	m.activeTab = Tab((int(m.activeTab) + 1) % 5)
-	if m.activeTab == TabNodes {
-		m.updateSlotIndicators()
-	}
+	m.activeTab = Tab((int(m.activeTab) + 1) % 4)
 }
 
 func (m *Model) prevTab() {
-	m.activeTab = Tab((int(m.activeTab) + 4) % 5)
-	if m.activeTab == TabNodes {
-		m.updateSlotIndicators()
-	}
+	m.activeTab = Tab((int(m.activeTab) + 3) % 4)
 }
 
 func (m *Model) setTab(t Tab) {
-	if t < TabNodes || t > TabLogs {
+	if t < TabSlots || t > TabLogs {
 		return
 	}
 	m.activeTab = t
-	if m.activeTab == TabNodes {
-		m.updateSlotIndicators()
-	}
 }
 
 func wrapPlainText(s string, width int) string {
@@ -1230,7 +1019,6 @@ func (m *Model) updateSizes() {
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
-	m.nodesTab.SetSize(m.width, contentHeight)
 	if m.slotsTab != nil && m.slotsTab.IsFullScreen() {
 		m.slotsTab.SetSize(m.width, m.height)
 	} else {
@@ -1265,49 +1053,8 @@ func sameSlotSelection(state *proxy.SlotState, subID string, n *subscription.Nod
 	return state.SubID == subID && state.NodeName == n.Name
 }
 
-// handleNodesEnterForSlot0 cycles Slot 0: Rule → Global → Stop.
-// If a different node is selected or Slot 0 is idle, starts in Rule mode.
-func (m *Model) handleNodesEnterForSlot0() tea.Cmd {
-	var focused *subscription.Node
-	if m.nodesTab != nil {
-		focused = m.nodesTab.GetSelectedNode()
-	}
-	if focused == nil {
-		return nil
-	}
-
-	// Track selection
-	m.selectedNode = focused
-	m.nodeMgr.Select(focused)
-	m.statusBar.SetSelectedNode(focused)
-	if m.nodesTab != nil {
-		m.nodesTab.SetPreselect(focused)
-	}
-
-	state := m.slotMgr.GetSlotState(0)
-
-	// Same node already running → cycle: Rule → Global → Stop
-	if state != nil && sameSlotSelection(state, m.activeSubID, focused) {
-		return func() tea.Msg {
-			_, err := m.slotMgr.CycleSlotMode(0)
-			return slotActionDoneMsg{slotID: 0, err: err}
-		}
-	}
-
-	// Different node or not running → set config + start as Rule
-	m.cfg.SetSlotNodeRef(0, config.SlotNodeRef{
-		SubID:      m.activeSubID,
-		NodeName:   focused.Name,
-		NodeServer: focused.Server,
-		NodePort:   focused.Port,
-		NodeType:   focused.Type,
-	})
-	_ = m.cfg.Save()
-	m.syncSlotConfigSelection(0, m.activeSubID, focused, "rule")
-	return m.startSlotWithMode(0, m.activeSubID, focused, "rule")
-}
-
 func (m *Model) startSlotWithMode(slotID int, subID string, node *subscription.Node, mode string) tea.Cmd {
+
 	if node == nil {
 		return func() tea.Msg {
 			return slotActionDoneMsg{slotID: slotID, err: fmt.Errorf("no node selected")}
@@ -1343,23 +1090,6 @@ func (m *Model) startSlotWithMode(slotID int, subID string, node *subscription.N
 
 		err := m.slotMgr.StartSlotWithMode(slotID, subID, nodes, targetNode, mode)
 		return slotActionDoneMsg{slotID: slotID, err: err}
-	}
-}
-
-func (m *Model) syncSlotConfigSelection(slotID int, subID string, node *subscription.Node, mode string) {
-	if m == nil || m.cfg == nil || node == nil {
-		return
-	}
-	m.cfg.SetSlotNodeRef(slotID, config.SlotNodeRef{
-		SubID:      subID,
-		NodeName:   node.Name,
-		NodeServer: node.Server,
-		NodePort:   node.Port,
-		NodeType:   node.Type,
-	})
-	m.cfg.SetSlotStartMode(slotID, mode)
-	if err := m.cfg.Save(); err != nil {
-		logger.Warn("failed to save slot %d config: %v", slotID, err)
 	}
 }
 
@@ -1493,7 +1223,7 @@ func (m *Model) restartSlot0() tea.Cmd {
 			if msg == "" {
 				msg = "No node selected"
 			}
-			return overlayMsg{text: fmt.Sprintf(msg, i18n.M().Tabs.Nodes)}
+			return overlayMsg{text: fmt.Sprintf(msg, i18n.M().Tabs.Subscription)}
 		}
 
 		_ = m.slotMgr.StopSlot(0)
@@ -1586,20 +1316,21 @@ func slotModeIcon(mode string) string {
 }
 
 func (m *Model) updateSlotIndicators() {
-	if m.nodesTab == nil {
-		return
-	}
-	indicators := make(map[string]tabs.SlotIndicator)
+	indicators := make(map[string]components.SlotIndicator)
 
-	// Nodes tab only reflects Slot 0 state.
 	if s := m.slotMgr.GetSlotState(0); s != nil && s.NodeName != "" && s.Mode != "" {
-		indicators[s.NodeName] = tabs.SlotIndicator{
+		indicators[s.NodeName] = components.SlotIndicator{
 			SlotID: 0,
 			Icon:   slotModeIcon(s.Mode),
 		}
 	}
 
-	m.nodesTab.SetSlotIndicators(indicators)
+	if m.slotsTab != nil {
+		m.slotsTab.SetNodeBrowserIndicators(indicators)
+	}
+	if m.subsTab != nil {
+		m.subsTab.SetNodeBrowserIndicators(indicators)
+	}
 }
 
 func (m *Model) updateStatusBar() {
@@ -1636,57 +1367,9 @@ func (m *Model) updateStatusBar() {
 	}
 }
 
-func (m *Model) switchSubscription(delta int) tea.Cmd {
-	subs := m.subManager.List()
-	if len(subs) <= 1 {
-		return nil
-	}
-
-	sortSubscriptionsByNameAndID(subs)
-
-	currentIdx := m.subTabIdx
-	if currentIdx < 0 || currentIdx >= len(subs) || subs[currentIdx] == nil || subs[currentIdx].ID != m.activeSubID {
-		currentIdx = -1
-		for i, sub := range subs {
-			if sub != nil && sub.ID == m.activeSubID {
-				currentIdx = i
-				break
-			}
-		}
-	}
-
-	if currentIdx < 0 {
-		currentIdx = 0
-	}
-
-	nextIdx := (currentIdx + delta + len(subs)) % len(subs)
-	newSub := subs[nextIdx]
-	if newSub == nil || newSub.ID == m.activeSubID {
-		return nil
-	}
-
-	// NOTE: Do NOT disconnect running slots — slots from other subscriptions keep running.
-	m.activeSubID = newSub.ID
-	m.subTabIdx = nextIdx
-	if m.nodesTab != nil {
-		m.nodesTab.SetSubscriptionID(m.activeSubID)
-	}
-	if m.subsTab != nil {
-		m.subsTab.SetActiveSubscription(m.activeSubID)
-	}
-
-	return tea.Batch(
-		m.persistActiveSubscription(m.activeSubID),
-		m.nodesTab.Init(),
-	)
-}
-
 func (m *Model) disconnectAllSlots() {
 	if m.slotMgr != nil {
 		m.slotMgr.StopAll()
-	}
-	if m.nodesTab != nil {
-		m.nodesTab.SetSlotIndicators(nil)
 	}
 	m.slotTrafficLast = make(map[int]trafficSnapshot)
 	if m.statusBar != nil {

@@ -19,6 +19,19 @@ type Config struct {
 	UI              UIConfig             `yaml:"ui"`
 }
 
+// SystemProxyConfig stores macOS system proxy preferences.
+type SystemProxyConfig struct {
+	Enabled                bool     `yaml:"enabled,omitempty"`
+	Host                   string   `yaml:"host,omitempty"`
+	Port                   int      `yaml:"port,omitempty"`
+	PACMode                bool     `yaml:"pac_mode,omitempty"`
+	ProxyGuard             bool     `yaml:"proxy_guard,omitempty"`
+	GuardDurationSeconds   int      `yaml:"guard_duration_seconds,omitempty"`
+	AlwaysUseDefaultBypass bool     `yaml:"always_use_default_bypass,omitempty"`
+	ValidateBypassFormat   bool     `yaml:"validate_bypass_format,omitempty"`
+	Bypass                 []string `yaml:"bypass,omitempty"`
+}
+
 // ProxyConfig represents proxy port configuration
 type ProxyConfig struct {
 	MixedPort     int    `yaml:"mixed_port"`      // Single port for both SOCKS5 and HTTP
@@ -27,6 +40,16 @@ type ProxyConfig struct {
 	AllowLan      bool   `yaml:"allow_lan"`
 	BindAddress   string `yaml:"bind_address"`
 	TunEnabled    bool   `yaml:"tun_enabled"`
+	TunStack      string `yaml:"tun_stack,omitempty"`  // "mixed", "gvisor", "system"; empty = platform default
+	TunMTU        int    `yaml:"tun_mtu,omitempty"`    // 0 = mihomo default
+	TunDevice     string `yaml:"tun_device,omitempty"` // empty = mihomo default
+	// Additional TUN settings.
+	TunAutoRoute           bool              `yaml:"tun_auto_route,omitempty"`
+	TunStrictRoute         bool              `yaml:"tun_strict_route,omitempty"`
+	TunAutoDetectInterface bool              `yaml:"tun_auto_detect_interface,omitempty"`
+	TunDNSHijack           []string          `yaml:"tun_dns_hijack,omitempty"`
+	TunRouteExcludeAddress []string          `yaml:"tun_route_exclude_address,omitempty"`
+	SystemProxy            SystemProxyConfig `yaml:"system_proxy,omitempty"`
 	// DockerRedirectTCP redirects Docker container TCP traffic (internet-bound) to mihomo redir-port via iptables.
 	// Linux only; requires root to apply iptables rules.
 	DockerRedirectTCP bool `yaml:"docker_redirect_tcp"`
@@ -121,12 +144,26 @@ type SlotHistoryEntry struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Proxy: ProxyConfig{
-			MixedPort:         17890,
-			BaseMixedPort:     17890,
-			BaseAPIPort:       9090,
-			AllowLan:          true,
-			BindAddress:       "0.0.0.0",
-			TunEnabled:        false,
+			MixedPort:              17890,
+			BaseMixedPort:          17890,
+			BaseAPIPort:            9090,
+			AllowLan:               true,
+			BindAddress:            "0.0.0.0",
+			TunEnabled:             false,
+			TunAutoRoute:           true,
+			TunStrictRoute:         false,
+			TunAutoDetectInterface: true,
+			SystemProxy: SystemProxyConfig{
+				Enabled:                false,
+				Host:                   "127.0.0.1",
+				Port:                   17890,
+				PACMode:                false,
+				ProxyGuard:             false,
+				GuardDurationSeconds:   30,
+				AlwaysUseDefaultBypass: true,
+				ValidateBypassFormat:   true,
+				Bypass:                 []string{"127.0.0.1", "localhost", "192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "*.local", "<local>"},
+			},
 			DockerRedirectTCP: false,
 		},
 		Subscription: SubscriptionConfig{

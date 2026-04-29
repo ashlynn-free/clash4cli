@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## v0.8.5 - 2026-04-11
+
+### Fixed
+- Suppress `[proxychains] DLL init` banner in c4cgo stderr output.
+
 ## v0.8.4 - 2026-04-11
 
 ### Added

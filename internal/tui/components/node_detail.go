@@ -1,4 +1,4 @@
-package tabs
+package components
 
 import (
 	"encoding/json"
