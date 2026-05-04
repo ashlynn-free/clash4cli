@@ -88,7 +88,7 @@ const (
 // SettingsTab represents the settings tab
 type SettingsTab struct {
 	cfg              *config.Config
-	slotMgr          *proxy.SlotManager
+	slotMgr          proxy.SlotService
 	appVersion       string
 	width            int
 	height           int
@@ -187,7 +187,7 @@ var upstreamProtocolOptions = []selectOption{
 }
 
 // NewSettingsTab creates a new settings tab
-func NewSettingsTab(cfg *config.Config, slotMgr *proxy.SlotManager, version string) *SettingsTab {
+func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version string) *SettingsTab {
 	mixedPortInput := textinput.New()
 	mixedPortInput.SetValue(fmt.Sprintf("%d", cfg.Proxy.MixedPort))
 	mixedPortInput.CharLimit = 5

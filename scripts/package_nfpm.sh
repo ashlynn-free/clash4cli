@@ -111,7 +111,7 @@ if [[ ! -d "$build_dir" ]]; then
   exit 1
 fi
 
-req_files=( "$build_dir/c4c" "$build_dir/c4cgo" "$build_dir/mihomo" )
+req_files=( "$build_dir/c4c" "$build_dir/c4cgo" "$build_dir/c4cd" "$build_dir/mihomo" )
 for f in "${req_files[@]}"; do
   if [[ ! -f "$f" ]]; then
     echo "Error: required file missing: $f" >&2
@@ -144,6 +144,10 @@ trap cleanup EXIT
   echo "      mode: 0755"
   echo "  - src: ${build_dir}/c4cgo"
   echo "    dst: /usr/bin/c4cgo"
+  echo "    file_info:"
+  echo "      mode: 0755"
+  echo "  - src: ${build_dir}/c4cd"
+  echo "    dst: /usr/bin/c4cd"
   echo "    file_info:"
   echo "      mode: 0755"
   echo "  - src: ${build_dir}/mihomo"

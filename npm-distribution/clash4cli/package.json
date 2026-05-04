@@ -5,7 +5,8 @@
   "license": "MIT",
   "bin": {
     "c4c": "bin/c4c",
-    "c4cgo": "bin/c4cgo"
+    "c4cgo": "bin/c4cgo",
+    "c4cd": "bin/c4cd"
   },
   "optionalDependencies": {
     "@clash4cli/darwin-arm64": "0.0.0",

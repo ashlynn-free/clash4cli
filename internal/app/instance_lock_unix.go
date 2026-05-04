@@ -46,7 +46,6 @@ func tryAcquireInstanceLock(lockPath string) (*instanceLock, error) {
 		return nil, err
 	}
 
-	// Record our PID for humans and for the next process to display.
 	if err := f.Truncate(0); err == nil {
 		_, _ = f.Seek(0, 0)
 		_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
@@ -87,7 +86,6 @@ func killProcess(pid int) error {
 		return fmt.Errorf("refusing to kill pid %d", pid)
 	}
 
-	// Try graceful shutdown first.
 	_ = unix.Kill(pid, unix.SIGTERM)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -97,7 +95,6 @@ func killProcess(pid int) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Force kill.
 	_ = unix.Kill(pid, unix.SIGKILL)
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -119,6 +116,75 @@ func askYesNo(prompt string) bool {
 	}
 	answer := strings.TrimSpace(strings.ToLower(line))
 	return answer == "y" || answer == "yes"
+}
+
+type daemonTakeoverOptions struct {
+	ReadPID       func(string) int
+	ValidatePID   func(int) error
+	IsProcessAlive func(int) bool
+	KillProcess   func(int) error
+	RetryTimeout  time.Duration
+	RetryInterval time.Duration
+}
+
+func ensureSingleInstanceDaemon(lockPath string, opts daemonTakeoverOptions) (*instanceLock, error) {
+	lock, err := tryAcquireInstanceLock(lockPath)
+	if err == nil {
+		return lock, nil
+	}
+	if !errors.Is(err, errInstanceAlreadyRunning) {
+		return nil, err
+	}
+
+	readPID := opts.ReadPID
+	if readPID == nil {
+		readPID = readInstancePID
+	}
+	alive := opts.IsProcessAlive
+	if alive == nil {
+		alive = isProcessAlive
+	}
+	killer := opts.KillProcess
+	if killer == nil {
+		killer = killProcess
+	}
+	timeout := opts.RetryTimeout
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	interval := opts.RetryInterval
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+
+	pid := readPID(lockPath)
+	if pid <= 0 {
+		return nil, fmt.Errorf("cannot determine existing daemon pid from lock file: %s", lockPath)
+	}
+	if opts.ValidatePID != nil {
+		if err := opts.ValidatePID(pid); err != nil {
+			return nil, fmt.Errorf("refusing daemon takeover for pid %d: %w", pid, err)
+		}
+	}
+	if alive(pid) {
+		if err := killer(pid); err != nil {
+			return nil, fmt.Errorf("failed to kill pid %d: %w", pid, err)
+		}
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		lock, err = tryAcquireInstanceLock(lockPath)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, errInstanceAlreadyRunning) {
+			return nil, err
+		}
+		time.Sleep(interval)
+	}
+
+	return nil, fmt.Errorf("failed to acquire daemon lock after takeover of pid %d", pid)
 }
 
 func ensureSingleInstanceInteractive(lockPath string) (*instanceLock, error) {
@@ -145,7 +211,6 @@ func ensureSingleInstanceInteractive(lockPath string) (*instanceLock, error) {
 		return nil, fmt.Errorf("cannot determine existing c4c pid from lock file: %s", lockPath)
 	}
 
-	// Retry acquiring the lock after the previous process exits.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		lock, err = tryAcquireInstanceLock(lockPath)

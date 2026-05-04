@@ -3,14 +3,38 @@ package proxy
 import (
 	"encoding/json"
 	"os"
+	"time"
 
 	"rocket4cli/internal/config"
 )
 
+// CompatibilityProjection describes daemon-authored projection freshness metadata.
+type CompatibilityProjection struct {
+	Source           string `json:"source"`
+	DaemonPID        int    `json:"daemon_pid"`
+	DaemonAPIVersion string `json:"daemon_api_version"`
+	DaemonStartedAt  string `json:"daemon_started_at"`
+	Revision         uint64 `json:"revision"`
+	GeneratedAt      string `json:"generated_at"`
+	MaxAgeSeconds    int    `json:"max_age_seconds"`
+}
+
+// ProjectionMeta is the metadata used when writing daemon-authored projections.
+type ProjectionMeta struct {
+	Source           string
+	DaemonPID        int
+	DaemonAPIVersion string
+	DaemonStartedAt  string
+	Revision         uint64
+	GeneratedAt      time.Time
+	MaxAge           time.Duration
+}
+
 // MultiLockFile is the v2 lock file format that supports multiple proxy instances.
 type MultiLockFile struct {
-	Version   int              `json:"version"`
-	Instances map[int]LockFile `json:"instances"`
+	Version    int                     `json:"version"`
+	Projection *CompatibilityProjection `json:"projection,omitempty"`
+	Instances  map[int]LockFile        `json:"instances"`
 }
 
 // ReadMultiLockFile reads the proxy.lock file and returns a MultiLockFile.
@@ -129,8 +153,58 @@ func readSlotLockFile(slotID int) (*LockFile, error) {
 	return &lockCopy, nil
 }
 
+func WriteProjectedMultiLockFile(mlf *MultiLockFile, meta ProjectionMeta) error {
+	if mlf == nil {
+		mlf = &MultiLockFile{}
+	}
+	if mlf.Instances == nil {
+		mlf.Instances = make(map[int]LockFile)
+	}
+	if meta.Source == "" {
+		meta.Source = "c4cd"
+	}
+	generatedAt := meta.GeneratedAt
+	if generatedAt.IsZero() {
+		generatedAt = time.Now().UTC()
+	}
+	maxAgeSeconds := int(meta.MaxAge / time.Second)
+	if maxAgeSeconds < 0 {
+		maxAgeSeconds = 0
+	}
+	mlf.Version = 2
+	mlf.Projection = &CompatibilityProjection{
+		Source:           meta.Source,
+		DaemonPID:        meta.DaemonPID,
+		DaemonAPIVersion: meta.DaemonAPIVersion,
+		DaemonStartedAt:  meta.DaemonStartedAt,
+		Revision:         meta.Revision,
+		GeneratedAt:      generatedAt.Format(time.RFC3339Nano),
+		MaxAgeSeconds:    maxAgeSeconds,
+	}
+	return writeMultiLockFile(mlf)
+}
+
 func removeSlotLockFile(slotID int) error {
 	return updateMultiLockFile(func(mlf *MultiLockFile) {
 		delete(mlf.Instances, slotID)
 	})
+}
+
+// ProjectionFresh reports whether a daemon-authored projection is still fresh.
+func ProjectionFresh(mlf *MultiLockFile, now time.Time) bool {
+	if mlf == nil || mlf.Projection == nil {
+		return false
+	}
+	p := mlf.Projection
+	if p.Source != "c4cd" || p.GeneratedAt == "" || p.MaxAgeSeconds <= 0 {
+		return false
+	}
+	generatedAt, err := time.Parse(time.RFC3339Nano, p.GeneratedAt)
+	if err != nil {
+		return false
+	}
+	if now.Before(generatedAt) {
+		return false
+	}
+	return now.Sub(generatedAt) <= time.Duration(p.MaxAgeSeconds)*time.Second
 }

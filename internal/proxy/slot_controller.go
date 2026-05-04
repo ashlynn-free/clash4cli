@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"rocket4cli/internal/logger"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,7 +25,6 @@ type SlotController struct {
 func NewSlotController(slotID int, cfg *config.Config) *SlotController {
 	c := &Controller{
 		status:            StatusStopped,
-		logCh:             make(chan LogEntry, 100),
 		apiClient:         &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
 		cfg:               cfg,
 		apiHost:           "127.0.0.1",
@@ -125,11 +125,6 @@ func (sc *SlotController) IsAttached() bool {
 	return sc.ctrl.attached
 }
 
-// LogChannel returns the log channel.
-func (sc *SlotController) LogChannel() <-chan LogEntry {
-	return sc.ctrl.LogChannel()
-}
-
 // AttachFromLock restores a slot controller's state from a lock file entry.
 func (sc *SlotController) AttachFromLock(lock *LockFile) {
 	sc.ctrl.mu.Lock()
@@ -181,13 +176,13 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	defer c.mu.Unlock()
 
 	if c.status == StatusRunning || c.status == StatusStarting {
-		c.logCh <- LogEntry{Level: "warn", Message: "proxy already running"}
+		logger.Warn("[slot%d] proxy already running", slotID)
 		return fmt.Errorf("proxy already running")
 	}
 
 	c.status = StatusStarting
 	c.attached = false // Mark as started by this process (not from lockfile)
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Starting proxy slot %d (detached)...", slotID)}
+	logger.Info("[slot%d] Starting proxy slot %d (detached)...", slotID, slotID)
 
 	secret, err := generateSecret()
 	if err != nil {
@@ -241,7 +236,7 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	if !canListenTCP(proxyListenHost, mixedPort) {
 		// Attempt to kill stale mihomo process on this port
 		if killStaleProcessOnPort(mixedPort) {
-			c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Killed stale mihomo process on port %d", mixedPort)}
+			logger.Info("[slot%d] Killed stale mihomo process on port %d", slotID, mixedPort)
 		}
 		if !canListenTCP(proxyListenHost, mixedPort) {
 			c.status = StatusError
@@ -261,7 +256,7 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	}
 	if !canListenTCP(apiHost, apiPort) {
 		if killStaleProcessOnPort(apiPort) {
-			c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Killed stale mihomo process on port %d", apiPort)}
+			logger.Info("[slot%d] Killed stale mihomo process on port %d", slotID, apiPort)
 		}
 		if !canListenTCP(apiHost, apiPort) {
 			c.status = StatusError
@@ -331,7 +326,7 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 	c.pid = cmd.Process.Pid
 	c.status = StatusRunning
 
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("mihomo slot %d started (PID: %d, mixed: %d, api: %d)", slotID, c.pid, c.port, c.apiPort)}
+	logger.Info("[slot%d] mihomo started (PID: %d, mixed: %d, api: %d)", slotID, c.pid, c.port, c.apiPort)
 
 	startedPID := c.pid
 	startedCmd := c.cmd
@@ -388,7 +383,7 @@ func (c *Controller) StartSlotWithMode(slotID int, subID string, nodes []subscri
 		c.status = StatusStopped
 		c.cmd = nil
 		c.pid = 0
-		c.logCh <- LogEntry{Level: "warn", Message: fmt.Sprintf("mihomo slot %d stopped", slotID)}
+		logger.Warn("[slot%d] mihomo stopped", slotID)
 	}(startedPID, startedCmd)
 
 	return nil

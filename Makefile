@@ -8,6 +8,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 DIST_DIR := dist
 BINARY_NAME := c4c
 RGO_NAME := c4cgo
+DAEMON_NAME := c4cd
 GO_CACHE_DIR := $(CURDIR)/.build/go-cache
 GO_MOD_CACHE_DIR := $(CURDIR)/.build/go-mod-cache
 GO_PROXY ?= https://proxy.golang.org,direct
@@ -48,7 +49,8 @@ build:
 	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_CACHE_DIR)
 	CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(BINARY_NAME) ./cmd/c4c
 	CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(RGO_NAME) ./cmd/c4cgo
-	@echo "Done: $(BINARY_NAME), $(RGO_NAME)"
+	CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(DAEMON_NAME) ./cmd/c4cd
+	@echo "Done: $(BINARY_NAME), $(RGO_NAME), $(DAEMON_NAME)"
 
 # Build + create tar.gz for current platform
 package:
@@ -152,6 +154,7 @@ build-target:
 	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_CACHE_DIR)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(OUTPUT_DIR)/$(BINARY_NAME)$(EXT) ./cmd/c4c
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(OUTPUT_DIR)/$(RGO_NAME)$(EXT) ./cmd/c4cgo
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(OUTPUT_DIR)/$(DAEMON_NAME)$(EXT) ./cmd/c4cd
 
 	@# Include mihomo (required for c4c runtime)
 	@if [ -f "third_party/mihomo/mihomo-$(GOOS)-$(GOARCH)$(EXT)" ]; then \
@@ -197,26 +200,35 @@ build-target:
 clean:
 	@echo "Cleaning..."
 	@rm -rf $(DIST_DIR)
-	@rm -f $(BINARY_NAME) $(RGO_NAME)
+	@rm -f $(BINARY_NAME) $(RGO_NAME) $(DAEMON_NAME)
 
 # Install to /usr/local/bin
 install: build
 	@echo "Installing to /usr/local/bin..."
 	sudo cp $(BINARY_NAME) /usr/local/bin/
 	sudo cp $(RGO_NAME) /usr/local/bin/
-	@echo "Done. Run 'c4c' to start."
+	sudo cp $(DAEMON_NAME) /usr/local/bin/
+	@echo "Done. Run 'c4c' to start, or 'c4cd' for daemon mode."
 
 # Uninstall
 uninstall:
 	@echo "Uninstalling..."
 	sudo rm -f /usr/local/bin/$(BINARY_NAME)
 	sudo rm -f /usr/local/bin/$(RGO_NAME)
+	sudo rm -f /usr/local/bin/$(DAEMON_NAME)
 	@echo "Done."
 
-# Run dev
+# Run dev (c4cd daemon + c4c TUI)
 run:
 	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_CACHE_DIR)
-	$(GOENV) go run ./cmd/c4c
+	CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) -o $(DAEMON_NAME) ./cmd/c4cd
+	CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) -o $(RGO_NAME) ./cmd/c4cgo
+	CGO_ENABLED=$(CGO_ENABLED) $(GOENV) go build $(GO_BUILD_FLAGS) -o $(BINARY_NAME) ./cmd/c4c
+	@echo "Starting c4cd daemon..."
+	@./$(DAEMON_NAME) &
+	@sleep 1
+	@echo "Starting c4c TUI..."
+	@./$(BINARY_NAME); _exit=$$?; kill $(shell pgrep -f "^\./$(DAEMON_NAME)$$" 2>/dev/null) 2>/dev/null; exit $$_exit
 
 # Test
 test:
@@ -255,8 +267,8 @@ help:
 	@echo "  make release      Build+upload GitHub Release (requires GITHUB_TOKEN)"
 	@echo "  make build_all    Build tar.gz for all platforms"
 	@echo "  make clean        Remove build artifacts"
-	@echo "  make install      Install to /usr/local/bin"
-	@echo "  make uninstall    Remove from /usr/local/bin"
+	@echo "  make install      Install c4c/c4cgo/c4cd to /usr/local/bin"
+	@echo "  make uninstall    Remove c4c/c4cgo/c4cd from /usr/local/bin"
 	@echo "  make run          Run in development mode"
 	@echo "  make test         Run tests"
 	@echo "  make version      Show version info"

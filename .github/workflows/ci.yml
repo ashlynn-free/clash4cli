@@ -94,7 +94,9 @@ jobs:
         run: |
           set -euo pipefail
           make linux/amd64
+          test -f dist/clash4cli-linux-amd64-$(cat VERSION)/c4cd
           make linux/arm64
+          test -f dist/clash4cli-linux-arm64-$(cat VERSION)/c4cd
 
       - name: Build deb/rpm
         run: |
@@ -141,5 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           make darwin/amd64
+          test -f dist/clash4cli-darwin-amd64-$(cat VERSION)/c4cd
           make darwin/arm64
+          test -f dist/clash4cli-darwin-arm64-$(cat VERSION)/c4cd
 

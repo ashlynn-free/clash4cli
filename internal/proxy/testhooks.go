@@ -1,9 +1,13 @@
 package proxy
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os/exec"
+
+	"rocket4cli/internal/logger"
 	"time"
 )
 
@@ -33,6 +37,13 @@ func SetFindMihomoBinaryForTests(fn func() (string, error)) (restore func()) {
 		findMihomoBinaryFunc = fn
 	}
 	return func() { findMihomoBinaryFunc = prev }
+}
+
+var detachSubprocesses = true
+
+// SetDetachSubprocesses controls whether spawned mihomo processes are detached from the parent process.
+func SetDetachSubprocesses(detach bool) {
+	detachSubprocesses = detach
 }
 
 // startMihomoProcess creates and starts the mihomo subprocess.
@@ -68,24 +79,65 @@ func SetProbeLatencyForTests(fn func(proxyHost string, proxyPort int, testURL st
 func defaultStartMihomoProcess(mihomoPath, workDir, configPath, logPath string) (*exec.Cmd, error) {
 	cmd := exec.Command(mihomoPath, "-d", workDir, "-f", configPath)
 	cmd.Dir = workDir
-	configureDetachedCommand(cmd)
+	if detachSubprocesses {
+		configureDetachedCommand(cmd)
+	}
 
 	devNull, logFile, err := openProcessFiles(logPath)
 	if err != nil {
 		return nil, err
 	}
 	cmd.Stdin = devNull
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
 
-	if err := cmd.Start(); err != nil {
+	if detachSubprocesses {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		if err := cmd.Start(); err != nil {
+			_ = devNull.Close()
+			_ = logFile.Close()
+			return nil, fmt.Errorf("failed to start mihomo: %w", err)
+		}
 		_ = devNull.Close()
 		_ = logFile.Close()
-		return nil, fmt.Errorf("failed to start mihomo: %w", err)
+	} else {
+		// Daemon mode: read mihomo stdout/stderr through pipes so output
+		// appears in both the log file and the SSE log stream.
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			_ = devNull.Close()
+			_ = logFile.Close()
+			return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		}
+		stderrPipe, err := cmd.StderrPipe()
+		if err != nil {
+			_ = devNull.Close()
+			_ = logFile.Close()
+			return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		}
+		if err := cmd.Start(); err != nil {
+			_ = devNull.Close()
+			_ = logFile.Close()
+			return nil, fmt.Errorf("failed to start mihomo: %w", err)
+		}
+		_ = devNull.Close()
+		// Keep logFile open until pipe readers finish (child exit).
+		go pipeMihomoToLogAndLogger(stdoutPipe, logFile)
+		go pipeMihomoToLogAndLogger(stderrPipe, logFile)
 	}
 
-	_ = devNull.Close()
-	_ = logFile.Close()
 	return cmd, nil
+}
+
+// pipeMihomoToLogAndLogger reads lines from r, writes them to the log file,
+// and publishes them via the logger. logFile is closed when r is exhausted.
+func pipeMihomoToLogAndLogger(r io.ReadCloser, logFile io.WriteCloser) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		_, _ = logFile.Write([]byte(line + "\n"))
+		logger.Info("[mihomo] %s", line)
+	}
+	_ = r.Close()
+	_ = logFile.Close()
 }
 

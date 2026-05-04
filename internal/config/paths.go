@@ -108,6 +108,42 @@ func GetInstanceLockFilePath() (string, error) {
 	return filepath.Join(baseDir, "c4c.lock"), nil
 }
 
+// GetDaemonLockFilePath returns the daemon authority lock file path.
+func GetDaemonLockFilePath() (string, error) {
+	baseDir, err := GetBaseDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "daemon.lock"), nil
+}
+
+// GetDaemonPIDFilePath returns the daemon PID file path.
+func GetDaemonPIDFilePath() (string, error) {
+	baseDir, err := GetBaseDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "daemon.pid"), nil
+}
+
+// GetDaemonInfoFilePath returns the daemon info metadata file path.
+func GetDaemonInfoFilePath() (string, error) {
+	baseDir, err := GetBaseDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "daemon.info.json"), nil
+}
+
+// GetDaemonLogFilePath returns the daemon log file path.
+func GetDaemonLogFilePath() (string, error) {
+	logDir, err := GetLogDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(logDir, "c4cd.log"), nil
+}
+
 // EnsureDir creates directory if it doesn't exist
 func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0755)

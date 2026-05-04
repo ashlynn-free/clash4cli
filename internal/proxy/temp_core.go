@@ -355,7 +355,7 @@ type SlotTestResult struct {
 // SlotTest tests a slot through its full proxy chain and returns latency + region.
 // For RUNNING slots it uses the existing proxy port; for READY slots it starts
 // a temporary mihomo instance, tests, and shuts it down.
-func SlotTest(cfg *config.Config, subMgr *subscription.Manager, slotMgr *SlotManager, slotID int, timeout time.Duration) SlotTestResult {
+func SlotTest(cfg *config.Config, subMgr *subscription.Manager, slotMgr SlotService, slotID int, timeout time.Duration) SlotTestResult {
 	// Running slot — SOCKS5 through existing proxy
 	if slotMgr != nil {
 		if state := slotMgr.GetSlotState(slotID); state != nil && state.Port > 0 {

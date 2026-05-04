@@ -18,7 +18,7 @@ func TestLeavingSettingsTab_PreservesState(t *testing.T) {
 	nodeMgr := node.NewManager(subMgr, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
 	slotMgr := proxy.NewSlotManager(cfg)
 
-	m := New(cfg, subMgr, nodeMgr, slotMgr, "dev", "")
+	m := New(cfg, subMgr, nodeMgr, slotMgr, nil, "dev", "")
 	m.activeTab = TabSettings
 
 	// Type into the first field (mixed port).

@@ -81,18 +81,11 @@ func (s Status) String() string {
 	}
 }
 
-// LogEntry represents a log entry from mihomo
-type LogEntry struct {
-	Level   string
-	Message string
-}
-
 // Controller controls the mihomo process
 type Controller struct {
 	cmd               *exec.Cmd
 	status            Status
 	mu                sync.RWMutex
-	logCh             chan LogEntry
 	apiClient         *http.Client
 	cfg               *config.Config
 	configPath        string
@@ -118,7 +111,6 @@ type Controller struct {
 func NewController(cfg *config.Config) *Controller {
 	c := &Controller{
 		status:            StatusStopped,
-		logCh:             make(chan LogEntry, 100),
 		apiClient:         &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}},
 		cfg:               cfg,
 		apiHost:           "127.0.0.1",
@@ -137,13 +129,13 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 
 	// If a previous c4c session left mihomo running, treat it as already running.
 	if c.status == StatusRunning || c.status == StatusStarting {
-		c.logCh <- LogEntry{Level: "warn", Message: "proxy already running"}
+		logger.Warn("[slot0] proxy already running")
 		return fmt.Errorf("proxy already running")
 	}
 	if lock, err := ReadLockFile(); err == nil && lock != nil {
 		if c.lockFileLooksAlive(lock) {
 			c.applyLockFileLocked(lock)
-			c.logCh <- LogEntry{Level: "warn", Message: "proxy already running (detected from proxy.lock)"}
+			logger.Warn("[slot0] proxy already running (detected from proxy.lock)")
 			return fmt.Errorf("proxy already running")
 		}
 		// Stale lock: best-effort remove.
@@ -151,7 +143,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	}
 
 	c.status = StatusStarting
-	c.logCh <- LogEntry{Level: "info", Message: "Starting proxy (detached)..."}
+	logger.Info("[slot0] Starting proxy (detached)...")
 
 	secret, err := generateSecret()
 	if err != nil {
@@ -228,7 +220,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to generate config: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
+		logger.Error("[slot0] %s", errMsg)
 		logger.Error("%s", errMsg)
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
@@ -239,30 +231,30 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to save config: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
+		logger.Error("[slot0] %s", errMsg)
 		logger.Error("%s", errMsg)
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 	c.configPath = configPath
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Config saved to: %s", configPath)}
+	logger.Info("[slot0] Config saved to: %s", configPath)
 
 	// Find mihomo binary
 	mihomoPath, err := findMihomoBinaryFunc()
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("mihomo binary not found: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
+		logger.Error("[slot0] %s", errMsg)
 		logger.Error("%s", errMsg)
 		return err
 	}
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Using mihomo: %s", mihomoPath)}
+	logger.Info("[slot0] Using mihomo: %s", mihomoPath)
 
 	// Get working directory
 	workDir, err := config.GetMihomoWorkDir()
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to get work dir: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
+		logger.Error("[slot0] %s", errMsg)
 		logger.Error("%s", errMsg)
 		return err
 	}
@@ -274,13 +266,13 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	}
 	c.logPath = logPath
 
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Executing (detached): %s -d %s -f %s", mihomoPath, workDir, c.configPath)}
+	logger.Info("[slot0] Executing (detached): %s -d %s -f %s", mihomoPath, workDir, c.configPath)
 
 	cmd, err := startMihomoProcess(mihomoPath, workDir, c.configPath, logPath)
 	if err != nil {
 		c.status = StatusError
 		errMsg := fmt.Sprintf("failed to start mihomo: %v", err)
-		c.logCh <- LogEntry{Level: "error", Message: errMsg}
+		logger.Error("[slot0] %s", errMsg)
 		logger.Error("%s", errMsg)
 		return err
 	}
@@ -289,7 +281,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 	c.pid = cmd.Process.Pid
 
 	logger.Info("mihomo process started (detached) with PID: %d", c.pid)
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("mihomo started (PID: %d)", c.pid)}
+	logger.Info("[slot0] mihomo started (PID: %d)", c.pid)
 	c.status = StatusRunning
 
 	// Create lock file (used by c4cgo and by the next c4c session to re-attach).
@@ -366,7 +358,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 			}
 			if !ready {
 				logger.Warn("mihomo API not ready, skip switching node")
-				c.logCh <- LogEntry{Level: "warn", Message: "mihomo API not ready, skip switching node"}
+				logger.Warn("[slot0] mihomo API not ready, skip switching node")
 				return
 			}
 
@@ -379,7 +371,7 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 
 			if err := c.SwitchNode(selectedName); err != nil {
 				logger.Warn("Failed to switch to node %s: %v", selectedName, err)
-				c.logCh <- LogEntry{Level: "warn", Message: fmt.Sprintf("Failed to switch node: %v", err)}
+				logger.Warn("[slot0] Failed to switch node: %v", err)
 			}
 		}()
 	}
@@ -396,21 +388,21 @@ func (c *Controller) Start(subID string, nodes []subscription.Node, selectedNode
 
 		if c.status == StatusStopping {
 			c.status = StatusStopped
-			c.logCh <- LogEntry{Level: "info", Message: "mihomo stopped normally"}
+			logger.Info("[slot0] mihomo stopped normally")
 			c.removeLockFile()
 			c.cmd = nil
 			c.pid = 0
 		} else if err != nil {
 			c.status = StatusError
 			errMsg := fmt.Sprintf("mihomo exited unexpectedly: %v", err)
-			c.logCh <- LogEntry{Level: "error", Message: errMsg}
+			logger.Error("[slot0] %s", errMsg)
 			logger.Error("%s", errMsg)
 			c.removeLockFile()
 			c.cmd = nil
 			c.pid = 0
 		} else {
 			c.status = StatusStopped
-			c.logCh <- LogEntry{Level: "warn", Message: "mihomo exited without error but unexpectedly"}
+			logger.Warn("[slot0] mihomo exited without error but unexpectedly")
 			c.removeLockFile()
 			c.cmd = nil
 			c.pid = 0
@@ -452,7 +444,7 @@ func (c *Controller) Stop() error {
 
 	logger.Info("stopping mihomo (pid=%d)...", lock.PID)
 	c.status = StatusStopping
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Stopping mihomo (PID: %d)...", lock.PID)}
+	logger.Info("[slot0] Stopping mihomo (PID: %d)...", lock.PID)
 
 	killErr := terminateProcess(lock.PID, 2*time.Second)
 
@@ -538,22 +530,12 @@ func (c *Controller) UpdateLockState(subID string, node *subscription.Node) {
 	})
 }
 
-// LogChannel returns the log channel
-func (c *Controller) LogChannel() <-chan LogEntry {
-	return c.logCh
-}
-
 // readLogs reads logs from a pipe
 func (c *Controller) readLogs(pipe io.ReadCloser, source string) {
-	defer pipe.Close() // Ensure pipe is closed when done
+	defer pipe.Close()
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
-		line := scanner.Text()
-		select {
-		case c.logCh <- LogEntry{Level: "info", Message: line}:
-		default:
-			// Drop log if channel is full
-		}
+		logger.Info("[slot0] %s", scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
 		logger.Warn("Error reading %s: %v", source, err)
@@ -708,7 +690,7 @@ func (c *Controller) SwitchGroup(groupName, entryName string) error {
 		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Switched %s to: %s", groupName, entryName)}
+	logger.Info("[slot0] Switched %s to: %s", groupName, entryName)
 	logger.Info("Switched %s to: %s", groupName, entryName)
 
 	// NOTE: Do NOT update the lock file here with v1 updateLockFile().
@@ -783,7 +765,7 @@ func (c *Controller) SetMode(mode string) error {
 		return fmt.Errorf("API returned status %d", lastStatus)
 	}
 
-	c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Mode switched to: %s", mode)}
+	logger.Info("[slot0] Mode switched to: %s", mode)
 	logger.Info("Mode switched to: %s", mode)
 	return nil
 }
@@ -1095,7 +1077,7 @@ func (c *Controller) syncFromLockFile() {
 	if c.lockFileLooksAlive(lock) {
 		c.applyLockFileLocked(lock)
 		logger.Info("Detected running mihomo from proxy.lock (pid=%d, port=%d)", lock.PID, lock.Port)
-		c.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Detected running proxy core (PID: %d)", lock.PID)}
+		logger.Info("[slot0] Detected running proxy core (PID: %d)", lock.PID)
 		go c.monitorExternalProxy(lock.PID, lock.Port, lock.ProxyHost)
 		return
 	}
@@ -1131,7 +1113,7 @@ func (c *Controller) monitorExternalProxy(pid int, port int, host string) {
 		c.removeLockFile()
 		c.mu.Unlock()
 
-		c.logCh <- LogEntry{Level: "warn", Message: "Proxy core stopped (detected)"} // best-effort
+		logger.Warn("[slot0] Proxy core stopped (detected)") // best-effort
 		return
 	}
 }

@@ -199,6 +199,16 @@ main() {
   make deps
   make all
 
+  # Ensure daemon binary is included in all build folders.
+  shopt -s nullglob
+  for d in dist/clash4cli-*; do
+    if [[ -d "$d" && ! -f "$d/c4cd" ]]; then
+      echo "Error: required daemon binary missing from artifact: $d/c4cd" >&2
+      exit 1
+    fi
+  done
+  shopt -u nullglob
+
   # deb/rpm require nfpm (install locally if missing).
   ensure_nfpm
   make linux_pkgs

@@ -43,19 +43,16 @@ func TestShouldFallbackToEnv(t *testing.T) {
 	}
 }
 
-func TestChainSummaries(t *testing.T) {
-	lf := proxy.LockFile{
-		Node:             "Node-A",
+func TestVerboseStateSummary(t *testing.T) {
+	state := &proxy.SlotState{
+		NodeName:         "Node-A",
 		UpstreamEnabled:  true,
 		UpstreamProtocol: "https",
 		UpstreamServer:   "gateway.example.com",
 		UpstreamPort:     443,
 	}
 
-	if got := listChainSummary(lf); got != "Node-A -> https://gateway.example.com:443" {
-		t.Fatalf("unexpected listChainSummary: %q", got)
-	}
-	if got := verboseChainSummary(lf); got != "chain: Node-A -> https://gateway.example.com:443" {
-		t.Fatalf("unexpected verboseChainSummary: %q", got)
+	if got := verboseStateSummary(state); got != "chain: Node-A -> https://gateway.example.com:443" {
+		t.Fatalf("unexpected verboseStateSummary: %q", got)
 	}
 }

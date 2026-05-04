@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"rocket4cli/internal/i18n"
-	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/tui/styles"
 )
 
@@ -74,12 +73,6 @@ func (t *LogsTab) Update(msg tea.Msg) (*LogsTab, tea.Cmd) {
 	case LogReceivedMsg:
 		t.addLog(msg.Entry)
 
-	case proxy.LogEntry:
-		t.addLog(LogEntry{
-			Time:    time.Now(),
-			Level:   msg.Level,
-			Message: msg.Message,
-		})
 	}
 
 	return t, nil

@@ -333,7 +333,7 @@ func (b *NodeBrowser) View() string {
 	if len(b.nodes) == 0 {
 		parts := []string{}
 		if b.title != "" {
-			parts = append(parts, styles.Title.Render(b.title))
+			parts = append(parts, styles.TitleBar.Render(b.title))
 		}
 		if subTabBar != "" {
 			parts = append(parts, subTabBar)
@@ -369,7 +369,7 @@ func (b *NodeBrowser) View() string {
 
 	parts := []string{}
 	if b.title != "" {
-		parts = append(parts, styles.Title.Render(b.title))
+		parts = append(parts, styles.TitleBar.Render(b.title))
 	}
 	if subTabBar != "" {
 		parts = append(parts, subTabBar)
@@ -541,8 +541,8 @@ func (b *NodeBrowser) renderSubTabs() string {
 }
 
 func (b *NodeBrowser) updateTableSize() {
-	// Reserve: sub-tabs(2) + table header(1) + separator(1) + help(1) + scroll(1) = 6
-	const reservedLines = 6
+	// Reserve: title(2) + sub-tabs(2) + table header(1) + separator(1) + help(1) + scroll indicator(1) = 8
+	const reservedLines = 8
 	rowsHeight := b.height - reservedLines
 	if rowsHeight < 1 {
 		rowsHeight = 1

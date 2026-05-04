@@ -73,7 +73,7 @@ type SlotTrafficInfo struct {
 type SlotsTab struct {
 	cfg        *config.Config
 	subManager *subscription.Manager
-	slotMgr    *proxy.SlotManager
+	slotMgr    proxy.SlotService
 	nodeMgr    *node.Manager
 
 	width  int
@@ -99,7 +99,7 @@ type SlotsTab struct {
 }
 
 // NewSlotsTab creates the slots tab.
-func NewSlotsTab(cfg *config.Config, subMgr *subscription.Manager, slotMgr *proxy.SlotManager, nodeMgr *node.Manager) *SlotsTab {
+func NewSlotsTab(cfg *config.Config, subMgr *subscription.Manager, slotMgr proxy.SlotService, nodeMgr *node.Manager) *SlotsTab {
 	manualPortInput := textinput.New()
 	manualPortInput.CharLimit = 5
 	manualPortInput.Placeholder = "17890"
@@ -135,10 +135,12 @@ func (t *SlotsTab) BlocksGlobalKeys() bool {
 	return t != nil && t.view != slotsViewList
 }
 
-// IsFullScreen reports whether the slots tab wants full-screen rendering (no tab bar / status bar).
+// IsFullScreen reports whether this tab wants to own the entire terminal area
+// (hiding the tab bar and status bar).
 func (t *SlotsTab) IsFullScreen() bool {
-	return t != nil && t.view != slotsViewList
+	return t != nil && t.view == slotsViewProxyPicker
 }
+
 
 // SetSize updates layout dimensions.
 func (t *SlotsTab) SetSize(width, height int) {

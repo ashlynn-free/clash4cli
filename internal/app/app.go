@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"rocket4cli/internal/config"
+	"rocket4cli/internal/daemon"
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/logger"
 	"rocket4cli/internal/netctl"
@@ -24,94 +26,100 @@ import (
 
 // App represents the main application
 type App struct {
-	cfg         *config.Config
-	subManager  *subscription.Manager
-	nodeMgr     *node.Manager
-	slotMgr     *proxy.SlotManager
-	lock        *instanceLock
-	version     string
-	startupWarn string
+	cfg            *config.Config
+	subManager     *subscription.Manager
+	nodeMgr        *node.Manager
+	slotMgr        proxy.SlotService
+	version        string
+	startupWarn    string
+	daemonClient   *daemon.Client
+	daemonInfo     *daemon.AuthorityInfo
+	daemonLogCh    <-chan logger.Entry
+	stopDaemonLog  func()
 }
 
 // New creates a new application instance
 func New(version string) (*App, error) {
-	// Ensure all directories exist
 	if err := config.EnsureAllDirs(); err != nil {
 		return nil, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	lockPath, err := config.GetInstanceLockFilePath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve instance lock path: %w", err)
-	}
-	lock, err := ensureSingleInstanceInteractive(lockPath)
-	if err != nil {
-		return nil, err
-	}
-	releaseLockOnError := true
-	defer func() {
-		if releaseLockOnError {
-			lock.release()
-		}
-	}()
-
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Initialize i18n
 	if err := i18n.Init(cfg.Language); err != nil {
 		return nil, fmt.Errorf("failed to initialize i18n: %w", err)
 	}
 
-	// Initialize logger
 	if err := logger.Init(); err != nil {
 		return nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 	logger.Info("clash4cli started")
 
-	// Create managers
 	subManager := subscription.NewManager()
 	if err := subManager.Load(); err != nil {
 		return nil, fmt.Errorf("failed to load subscriptions: %w", err)
 	}
 
 	nodeMgr := node.NewManager(subManager, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
-	slotMgr := proxy.NewSlotManager(cfg)
+	client, info, err := daemon.EnsureDaemon(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect or start c4cd: %w", err)
+	}
+	slotMgr := proxy.SlotService(newDaemonSlotService(client))
+	
+	var daemonLogCh <-chan logger.Entry
+	var stopDaemonLog func()
+	if client != nil {
+		daemonLogCh, stopDaemonLog, _ = client.StreamLogs(context.Background())
+	}
+
 	nodeMgr.SetProbeLockProvider(func(node *subscription.Node) *proxy.LockFile {
-		if node == nil || slotMgr == nil {
+		if node == nil || client == nil {
 			return nil
 		}
-		slotIDs := slotMgr.NodeSlots(node.Name)
-		if len(slotIDs) == 0 {
+		snapshot, err := client.Runtime(context.Background())
+		if err != nil || snapshot == nil {
 			return nil
 		}
-		mlf, err := proxy.ReadMultiLockFile()
-		if err != nil || mlf == nil {
-			return nil
-		}
-		for _, slotID := range slotIDs {
-			lock, ok := mlf.Instances[slotID]
-			if !ok {
+		for _, state := range snapshot.Active {
+			if state == nil || state.NodeName != node.Name {
 				continue
 			}
-			lockCopy := lock
-			return &lockCopy
+			return &proxy.LockFile{
+				Port:             state.Port,
+				APIPort:          state.APIPort,
+				PID:              state.PID,
+				SubID:            state.SubID,
+				Node:             state.NodeName,
+				ProxyHost:        "127.0.0.1",
+				APIHost:          "127.0.0.1",
+				UpstreamEnabled:  state.UpstreamEnabled,
+				UpstreamProtocol: state.UpstreamProtocol,
+				UpstreamServer:   state.UpstreamServer,
+				UpstreamPort:     state.UpstreamPort,
+			}
 		}
 		return nil
 	})
+
 	subManager.SetUpdateViaProxy(cfg.Subscription.UpdateViaProxy)
 	subManager.SetProxyProvider(func() (*url.URL, error) {
-		// Use slot 0 (or first active slot) for subscription updates via proxy,
-		// but never borrow a slot that is already chained to an upstream proxy.
-		state := slotMgr.GetSlotState(0)
-		if state != nil && state.UpstreamEnabled {
-			state = nil
+		snapshot, err := client.Runtime(context.Background())
+		if err != nil || snapshot == nil {
+			return nil, nil
+		}
+		var state *proxy.SlotState
+		for _, candidate := range snapshot.Active {
+			if candidate != nil && candidate.SlotID == 0 && !candidate.UpstreamEnabled {
+				state = candidate
+				break
+			}
 		}
 		if state == nil {
-			for _, candidate := range slotMgr.ActiveSlots() {
+			for _, candidate := range snapshot.Active {
 				if candidate != nil && !candidate.UpstreamEnabled {
 					state = candidate
 					break
@@ -121,10 +129,7 @@ func New(version string) (*App, error) {
 		if state == nil || state.Port <= 0 || state.Port >= 65536 {
 			return nil, nil
 		}
-		return &url.URL{
-			Scheme: "http",
-			Host:   net.JoinHostPort("127.0.0.1", strconv.Itoa(state.Port)),
-		}, nil
+		return &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(state.Port))}, nil
 	})
 
 	startupWarn := ""
@@ -137,34 +142,27 @@ func New(version string) (*App, error) {
 			features = append(features, "Docker 劫持")
 		}
 		feat := strings.Join(features, "/")
-		startupWarn = fmt.Sprintf("已启用需要 root 的功能（%s）。\n当前不是 root 运行，这些功能不会生效。\n请使用 sudo 启动 c4c（或授予 CAP_NET_ADMIN）。\n提示：sudo 启动时默认仍使用 SUDO_USER 的 ~/.clash4cli（可通过 CLASH4CLI_HOME 覆盖）。", feat)
+		startupWarn = fmt.Sprintf("已启用需要 root 的功能（%s）。\n当前连接的 daemon 不是 root 模式，这些功能不会生效。\n请使用 sudo 启动 c4cd。\n提示：sudo 启动时默认仍使用 SUDO_USER 的 ~/.clash4cli（可通过 CLASH4CLI_HOME 覆盖）。", feat)
 	}
 
-	a := &App{
-		cfg:         cfg,
-		subManager:  subManager,
-		nodeMgr:     nodeMgr,
-		slotMgr:     slotMgr,
-		lock:        lock,
-		version:     version,
-		startupWarn: startupWarn,
-	}
-	releaseLockOnError = false
-	return a, nil
+	return &App{
+		cfg:            cfg,
+		subManager:     subManager,
+		nodeMgr:        nodeMgr,
+		slotMgr:        slotMgr,
+		version:        version,
+		startupWarn:    startupWarn,
+		daemonClient:   client,
+		daemonInfo:     info,
+		daemonLogCh:    daemonLogCh,
+		stopDaemonLog:  stopDaemonLog,
+	}, nil
 }
 
 // Run starts the TUI application
 func (a *App) Run() error {
-	// Reset any leaked terminal attributes (e.g. underline/reverse) before
-	// entering the alternate screen. tmux can preserve these attributes across
-	// programs, causing "garbled" UI where spaces render as underscores.
 	_, _ = fmt.Fprint(os.Stdout, "\x1b[0m")
 
-	// Work around tmux setups where TERM is set to "screen" (no "color" suffix),
-	// which can cause termenv to report Ascii and disable all styling.
-	//
-	// Recommended fix for users is still: set tmux default-terminal to
-	// "tmux-256color" or "screen-256color".
 	if os.Getenv("TMUX") != "" {
 		r := lipgloss.NewRenderer(os.Stdout)
 		if r.ColorProfile() == termenv.Ascii {
@@ -174,14 +172,8 @@ func (a *App) Run() error {
 		}
 	}
 
-	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.slotMgr, a.version, a.startupWarn)
-
-	p := tea.NewProgram(
-		model,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
-
+	model := tui.New(a.cfg, a.subManager, a.nodeMgr, a.slotMgr, a.daemonLogCh, a.version, a.startupWarn)
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
@@ -189,7 +181,6 @@ func (a *App) Run() error {
 // Cleanup performs cleanup on shutdown
 func (a *App) Cleanup() {
 	logger.Info("clash4cli shutting down")
-
 	if runtime.GOOS == "darwin" {
 		snapshot, err := netctl.LoadSystemProxySnapshot()
 		if err == nil && snapshot != nil {
@@ -200,9 +191,8 @@ func (a *App) Cleanup() {
 			}
 		}
 	}
-
-	logger.Close()
-	if a.lock != nil {
-		a.lock.release()
+	if a.stopDaemonLog != nil {
+		a.stopDaemonLog()
 	}
+	logger.Close()
 }

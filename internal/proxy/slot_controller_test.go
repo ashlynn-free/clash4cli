@@ -42,7 +42,6 @@ func TestStartSlotWithMode_DirectOnly_NoMihomo(t *testing.T) {
 	cfg := config.DefaultConfig()
 	c := &Controller{
 		status:            StatusStopped,
-		logCh:             make(chan LogEntry, 100),
 		cfg:               cfg,
 		apiHost:           "127.0.0.1",
 		proxyHost:         "127.0.0.1",

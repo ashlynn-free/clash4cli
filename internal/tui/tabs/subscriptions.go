@@ -68,7 +68,7 @@ type SubscriptionsTab struct {
 	table           *components.Table
 	customTable     *components.Table
 	subManager      *subscription.Manager
-	slotMgr         *proxy.SlotManager
+	slotMgr         proxy.SlotService
 	subs            []*subscription.Subscription
 	customNodes     []subscription.Node
 	nodeMgr         *node.Manager
@@ -96,7 +96,7 @@ type SubscriptionsTab struct {
 }
 
 // NewSubscriptionsTab creates a new subscriptions tab
-func NewSubscriptionsTab(subMgr *subscription.Manager, slotMgr *proxy.SlotManager, nodeMgr *node.Manager) *SubscriptionsTab {
+func NewSubscriptionsTab(subMgr *subscription.Manager, slotMgr proxy.SlotService, nodeMgr *node.Manager) *SubscriptionsTab {
 	columns := []components.Column{
 		{Title: "Name", Width: 25},
 		{Title: "Nodes", Width: 8},
@@ -147,6 +147,12 @@ func (t *SubscriptionsTab) Init() tea.Cmd {
 // BlocksGlobalKeys returns true when this tab has an active overlay/input state.
 func (t *SubscriptionsTab) BlocksGlobalKeys() bool {
 	return t.inputMode != InputModeNone || t.showCustomManager || t.showNodeBrowser
+}
+
+// IsFullScreen reports whether this tab wants to own the entire terminal area
+// (hiding the tab bar and status bar).
+func (t *SubscriptionsTab) IsFullScreen() bool {
+	return t != nil && t.showNodeBrowser
 }
 
 // Update handles messages

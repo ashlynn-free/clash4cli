@@ -54,6 +54,7 @@ for entry in $PLATFORMS; do
   # Ensure binaries are executable
   chmod +x "$dest_dir/c4c" 2>/dev/null || true
   chmod +x "$dest_dir/c4cgo" 2>/dev/null || true
+  chmod +x "$dest_dir/c4cd" 2>/dev/null || true
   chmod +x "$dest_dir/mihomo" 2>/dev/null || true
 done
 
@@ -65,7 +66,8 @@ mkdir -p "$main_dest/bin"
 # Copy JS wrappers
 cp "$template_dir/clash4cli/bin/c4c" "$main_dest/bin/c4c"
 cp "$template_dir/clash4cli/bin/c4cgo" "$main_dest/bin/c4cgo"
-chmod +x "$main_dest/bin/c4c" "$main_dest/bin/c4cgo"
+cp "$template_dir/clash4cli/bin/c4cd" "$main_dest/bin/c4cd"
+chmod +x "$main_dest/bin/c4c" "$main_dest/bin/c4cgo" "$main_dest/bin/c4cd"
 
 # Write package.json with version replaced (both top-level and optionalDependencies)
 sed "s/\"0.0.0\"/\"${version}\"/g" \

@@ -36,18 +36,17 @@ type SlotManager struct {
 	slotModes  [MaxSlots]string // "rule", "global", "" (stopped)
 	slotNodes  [MaxSlots]string // node name per slot
 	slotSubIDs [MaxSlots]string // subscription ID per slot
-	logCh      chan LogEntry
 	// Callback to save slot history to config
 	saveHistoryFunc func(h []config.SlotHistoryEntry)
 	// Persistent slot history: maps slotID to historical state (preserved when slots stop)
 	slotHistory [MaxSlots]*config.SlotHistoryEntry
+	lockProjectionWriter func(*MultiLockFile) error
 }
 
 // NewSlotManager creates a new SlotManager.
 func NewSlotManager(cfg *config.Config) *SlotManager {
 	sm := &SlotManager{
-		cfg:   cfg,
-		logCh: make(chan LogEntry, 100),
+		cfg: cfg,
 	}
 	return sm
 }
@@ -59,9 +58,11 @@ func (sm *SlotManager) SetSaveHistoryFunc(fn func([]config.SlotHistoryEntry)) {
 	sm.mu.Unlock()
 }
 
-// LogChannel returns a channel that receives log entries from all slots.
-func (sm *SlotManager) LogChannel() <-chan LogEntry {
-	return sm.logCh
+// SetLockProjectionWriter sets the writer used for proxy.lock compatibility projection.
+func (sm *SlotManager) SetLockProjectionWriter(fn func(*MultiLockFile) error) {
+	sm.mu.Lock()
+	sm.lockProjectionWriter = fn
+	sm.mu.Unlock()
 }
 
 // StartSlot starts a proxy instance in the given slot.
@@ -108,7 +109,6 @@ func (sm *SlotManager) StartSlotWithMode(slotID int, subID string, nodes []subsc
 	sm.writeLockFileLocked()
 
 	// Forward logs from this slot
-	go sm.forwardLogs(slotID, sc)
 
 	// Monitor slot for unexpected death
 	go sm.monitorSlot(slotID, sc)
@@ -477,7 +477,7 @@ func (sm *SlotManager) SyncFromLockFile() {
 		}
 
 		logger.Info("Restored slot %d from lock file (pid=%d, port=%d, node=%s)", slotID, lock.PID, lock.Port, lock.Node)
-		sm.logCh <- LogEntry{Level: "info", Message: fmt.Sprintf("Restored slot %d (PID: %d, port: %d)", slotID, lock.PID, lock.Port)}
+			logger.Info("[slot%d] Restored slot %d (PID: %d, port: %d)", slotID, slotID, lock.PID, lock.Port)
 
 		// Apply non-default mode to mihomo after it's ready
 		if restoredMode != "rule" {
@@ -487,7 +487,6 @@ func (sm *SlotManager) SyncFromLockFile() {
 			}(slotID, restoredMode)
 		}
 
-		go sm.forwardLogs(slotID, sc)
 	}
 
 	// Rewrite lock file to remove dead entries
@@ -573,12 +572,21 @@ func (sm *SlotManager) writeLockFileLocked() {
 		sc.ctrl.mu.RUnlock()
 		mlf.Instances[i] = lock
 	}
-	if err := writeMultiLockFile(mlf); err != nil {
-		logger.Warn("Failed to write multi lock file: %v", err)
+
+	writer := sm.lockProjectionWriter
+	if writer != nil {
+		if err := writer(mlf); err != nil {
+			logger.Warn("Failed to write projected multi lock file: %v", err)
+		}
+	} else {
+		if err := writeMultiLockFile(mlf); err != nil {
+			logger.Warn("Failed to write multi lock file: %v", err)
+		}
 	}
 	// Also save slot history to config for UI display on restart
 	sm.saveSlotHistoryLocked()
 }
+
 
 func (sm *SlotManager) saveSlotHistoryLocked() {
 	if sm.cfg == nil {
@@ -608,20 +616,6 @@ func (sm *SlotManager) saveSlotHistoryLocked() {
 		historyCopy := make([]config.SlotHistoryEntry, len(history))
 		copy(historyCopy, history)
 		go sm.saveHistoryFunc(historyCopy)
-	}
-}
-
-func (sm *SlotManager) forwardLogs(slotID int, sc *SlotController) {
-	ch := sc.LogChannel()
-	for entry := range ch {
-		prefixed := LogEntry{
-			Level:   entry.Level,
-			Message: fmt.Sprintf("[slot%d] %s", slotID, entry.Message),
-		}
-		select {
-		case sm.logCh <- prefixed:
-		default:
-		}
 	}
 }
 

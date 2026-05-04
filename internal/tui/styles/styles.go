@@ -115,7 +115,19 @@ var (
 	Title = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(PrimaryColor).
+		Background(lipgloss.Color("#374151")).
 		Padding(0, 1)
+
+	// TitleBar is a full-width title row with background and bottom border,
+	// visually distinct from the content below.
+	TitleBar = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(PrimaryColor).
+			Background(lipgloss.Color("#374151")).
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
+			BorderForeground(MutedColor)
 
 	// Log level styles
 	LogDebug = lipgloss.NewStyle().Foreground(MutedColor)

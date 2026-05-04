@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"rocket4cli/internal/daemon"
 	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 )
@@ -100,52 +102,46 @@ runCommand:
 	port := specifiedPort
 	proxyHost := "127.0.0.1"
 
-	// If no port specified, read from lock file
+	// If no port specified, read from daemon runtime
 	if port == 0 {
-		mlf, err := proxy.ReadMultiLockFile()
-		if err != nil || mlf == nil || len(mlf.Instances) == 0 {
-			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Cannot read proxy.lock file\033[0m\n")
-			fmt.Fprintf(os.Stderr, "        c4c proxy is not running or lock file is missing.\n")
-			fmt.Fprintf(os.Stderr, "        Please start c4c and select a node first.\n")
+		snapshot, _, err := daemon.LoadRuntimeSnapshot(context.Background())
+		if err != nil || snapshot == nil || len(snapshot.Active) == 0 {
+			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Cannot read daemon runtime\033[0m\n")
+			fmt.Fprintf(os.Stderr, "        c4cd is not running, unreachable, or has no active slots.\n")
+			fmt.Fprintf(os.Stderr, "        Please start c4c/c4cd and select a node first.\n")
 			os.Exit(1)
 		}
 
-		var lockFile proxy.LockFile
+		var state *proxy.SlotState
 		var slotID int
-
 		if specifiedSlot >= 0 {
-			// User specified a slot
-			lf, ok := mlf.Instances[specifiedSlot]
-			if !ok {
+			for _, candidate := range snapshot.Active {
+				if candidate != nil && candidate.SlotID == specifiedSlot {
+					state = candidate
+					slotID = candidate.SlotID
+					break
+				}
+			}
+			if state == nil {
 				fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Slot %d is not active\033[0m\n", specifiedSlot)
 				fmt.Fprintf(os.Stderr, "        Run 'c4cgo' with no arguments to see active slots.\n")
 				os.Exit(1)
 			}
-			lockFile = lf
-			slotID = specifiedSlot
 		} else {
-			// Auto-detect: use the lowest-numbered active slot
-			ids := make([]int, 0, len(mlf.Instances))
-			for id := range mlf.Instances {
-				ids = append(ids, id)
-			}
-			sort.Ints(ids)
-			slotID = ids[0]
-			lockFile = mlf.Instances[slotID]
+			active := append([]*proxy.SlotState(nil), snapshot.Active...)
+			sort.Slice(active, func(i, j int) bool { return active[i].SlotID < active[j].SlotID })
+			state = active[0]
+			slotID = state.SlotID
 		}
 
-		port = lockFile.Port
-		if lockFile.ProxyHost != "" {
-			proxyHost = lockFile.ProxyHost
-		}
-
+		port = state.Port
 		if verboseMode {
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] c4cgo %s\033[0m\n", Version)
 			slotInfo := ""
-			if len(mlf.Instances) > 1 || specifiedSlot >= 0 {
+			if len(snapshot.Active) > 1 || specifiedSlot >= 0 {
 				slotInfo = fmt.Sprintf(" slot:%d", slotID)
 			}
-			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Using proxy at %s:%d (%s%s)\033[0m\n", proxyHost, port, verboseChainSummary(lockFile), slotInfo)
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Using daemon runtime at %s:%d (%s%s)\033[0m\n", proxyHost, port, verboseStateSummary(state), slotInfo)
 		}
 	}
 
@@ -233,7 +229,7 @@ Running c4cgo with no arguments shows all proxy slots and their status.
 
 Options:
   -s, --slot N   Use proxy from slot N (0-9, default: first active slot)
-  --port PORT    Specify proxy port (default: read from ~/.clash4cli/proxy.lock)
+  --port PORT    Specify proxy port (default: read from c4cd runtime)
   --mode MODE    Run mode: auto|proxychains|env (default: auto)
   -v, --verbose  Show detailed status messages before running command
   --version      Show version
@@ -248,7 +244,7 @@ Examples:
   c4cgo git clone https://github.com/user/repo.git
   c4cgo -v curl https://ip.sb                        Show proxy details
 
-Note: Make sure c4c is running and a node is selected.
+Note: Make sure c4cd is running and a slot is active.
 `, Version)
 }
 
@@ -293,37 +289,38 @@ func modeEmoji(mode string) string {
 }
 
 func listSlots() {
-	mlf, err := proxy.ReadMultiLockFile()
+	snapshot, _, err := daemon.LoadRuntimeSnapshot(context.Background())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Cannot read proxy.lock file: %v\033[0m\n", err)
+		fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: Cannot read daemon runtime: %v\033[0m\n", err)
 		os.Exit(1)
 	}
-	if mlf == nil || len(mlf.Instances) == 0 {
-		fmt.Println("No active slots. Start c4c and select a node first.")
+	if snapshot == nil || len(snapshot.Active) == 0 {
+		fmt.Println("No active slots. Start c4c/c4cd and select a node first.")
 		return
 	}
 
 	subNames := loadSubscriptionNames()
-
-	// Collect and sort active slot IDs
-	ids := make([]int, 0, len(mlf.Instances))
-	for id := range mlf.Instances {
-		ids = append(ids, id)
+	ids := make([]int, 0, len(snapshot.Active))
+	byID := make(map[int]*proxy.SlotState, len(snapshot.Active))
+	for _, state := range snapshot.Active {
+		if state == nil {
+			continue
+		}
+		ids = append(ids, state.SlotID)
+		byID[state.SlotID] = state
 	}
 	sort.Ints(ids)
-
-	// Print all slots 0-9, marking active ones
 	activeSet := make(map[int]bool, len(ids))
 	for _, id := range ids {
 		activeSet[id] = true
 	}
 
 	for i := 0; i < 10; i++ {
-		if lf, ok := mlf.Instances[i]; ok && activeSet[i] {
-			subName := subscriptionDisplayName(subNames, lf.SubID)
-			mode := queryMihomoMode(lf)
+		if state, ok := byID[i]; ok && activeSet[i] {
+			subName := subscriptionDisplayName(subNames, state.SubID)
+			mode := strings.ToLower(strings.TrimSpace(state.Mode))
 			emoji := modeEmoji(mode)
-			fmt.Printf("  %s Slot %d  \033[32m●\033[0m running at %d, %s (%s)\n", emoji, i, lf.Port, listChainSummary(lf), subName)
+			fmt.Printf("  %s Slot %d  \033[32m●\033[0m running at %d, %s (%s)\n", emoji, i, state.Port, verboseStateSummary(state), subName)
 		} else {
 			fmt.Printf("     Slot %d  \033[90m○\033[0m empty\n", i)
 		}
@@ -355,31 +352,30 @@ func subscriptionDisplayName(subNames map[string]string, subID string) string {
 	return subID
 }
 
-func verboseChainSummary(lf proxy.LockFile) string {
-	if lf.UpstreamEnabled {
-		return fmt.Sprintf("chain: %s -> %s", firstNonEmpty(lf.Node, "-"), upstreamEndpoint(lf))
+func verboseStateSummary(state *proxy.SlotState) string {
+	if state == nil {
+		return "node: -"
 	}
-	return fmt.Sprintf("node: %s", firstNonEmpty(lf.Node, "-"))
+	if state.UpstreamEnabled {
+		return fmt.Sprintf("chain: %s -> %s", firstNonEmpty(state.NodeName, "-"), upstreamStateEndpoint(state))
+	}
+	return fmt.Sprintf("node: %s", firstNonEmpty(state.NodeName, "-"))
 }
 
-func listChainSummary(lf proxy.LockFile) string {
-	if lf.UpstreamEnabled {
-		return fmt.Sprintf("%s -> %s", firstNonEmpty(lf.Node, "-"), upstreamEndpoint(lf))
+func upstreamStateEndpoint(state *proxy.SlotState) string {
+	if state == nil {
+		return "proxy://-"
 	}
-	return firstNonEmpty(lf.Node, "-")
-}
-
-func upstreamEndpoint(lf proxy.LockFile) string {
-	protocol := strings.TrimSpace(lf.UpstreamProtocol)
+	protocol := strings.TrimSpace(state.UpstreamProtocol)
 	if protocol == "" {
 		protocol = "proxy"
 	}
-	host := strings.TrimSpace(lf.UpstreamServer)
+	host := strings.TrimSpace(state.UpstreamServer)
 	if host == "" {
 		host = "-"
 	}
-	if lf.UpstreamPort > 0 {
-		return fmt.Sprintf("%s://%s:%d", protocol, host, lf.UpstreamPort)
+	if state.UpstreamPort > 0 {
+		return fmt.Sprintf("%s://%s:%d", protocol, host, state.UpstreamPort)
 	}
 	return fmt.Sprintf("%s://%s", protocol, host)
 }

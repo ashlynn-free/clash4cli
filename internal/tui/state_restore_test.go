@@ -48,7 +48,7 @@ func TestNew_RestoreActiveSubscriptionAndSelectedNodeFromConfig(t *testing.T) {
 	nodeMgr := node.NewManager(subMgr2, cfg2.SpeedTest.Concurrent, cfg2.SpeedTest.Timeout)
 	slotMgr := proxy.NewSlotManager(cfg2)
 
-	m := New(cfg2, subMgr2, nodeMgr, slotMgr, "dev", "")
+	m := New(cfg2, subMgr2, nodeMgr, slotMgr, nil, "dev", "")
 
 	if m.activeSubID != sub.ID {
 		t.Fatalf("expected activeSubID=%q, got %q", sub.ID, m.activeSubID)
@@ -126,7 +126,7 @@ func TestNew_RestoreFromProxyLockWhenCoreRunning(t *testing.T) {
 	nodeMgr := node.NewManager(subMgr2, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
 	slotMgr := proxy.NewSlotManager(cfg)
 
-	m := New(cfg, subMgr2, nodeMgr, slotMgr, "dev", "")
+	m := New(cfg, subMgr2, nodeMgr, slotMgr, nil, "dev", "")
 	if m.activeSubID != sub.ID {
 		t.Fatalf("expected activeSubID=%q, got %q", sub.ID, m.activeSubID)
 	}
@@ -161,7 +161,7 @@ func TestModel_PrefersNonCustomSubscriptionByDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	nodeMgr := node.NewManager(subMgr, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
 	slotMgr := proxy.NewSlotManager(cfg)
-	m := New(cfg, subMgr, nodeMgr, slotMgr, "dev", "")
+	m := New(cfg, subMgr, nodeMgr, slotMgr, nil, "dev", "")
 
 	subs := subMgr.List()
 	sortSubscriptionsByNameAndID(subs)

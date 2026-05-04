@@ -43,12 +43,18 @@ type Entry struct {
 	Message string
 }
 
+// Publisher is a callback for publishing log entries (e.g., to SSE).
+// Used in daemon mode to fan out log entries to the SSE hub.
+// Implementations must be safe for concurrent use.
+type Publisher func(Entry)
+
 // Logger handles logging to file and provides channel for TUI
 type Logger struct {
-	file     *os.File
-	mu       sync.Mutex
-	logCh    chan Entry
-	minLevel Level
+	file      *os.File
+	mu        sync.Mutex
+	logCh     chan Entry
+	minLevel  Level
+	publisher Publisher
 }
 
 var (
@@ -81,7 +87,7 @@ func Init() error {
 
 		defaultLogger = &Logger{
 			file:     file,
-			logCh:    make(chan Entry, 100),
+			logCh:    make(chan Entry, 500),
 			minLevel: LevelInfo,
 		}
 	})
@@ -100,6 +106,26 @@ func SetLevel(level Level) {
 	if defaultLogger != nil {
 		defaultLogger.mu.Lock()
 		defaultLogger.minLevel = level
+		defaultLogger.mu.Unlock()
+	}
+}
+
+// SetPublisher sets the log publisher callback for daemon mode.
+// The publisher is called asynchronously for each log entry.
+// Caller must ensure the publisher is safe for concurrent use.
+func SetPublisher(p Publisher) {
+	if defaultLogger != nil {
+		defaultLogger.mu.Lock()
+		defaultLogger.publisher = p
+		defaultLogger.mu.Unlock()
+	}
+}
+
+// ClearPublisher removes the publisher callback.
+func ClearPublisher() {
+	if defaultLogger != nil {
+		defaultLogger.mu.Lock()
+		defaultLogger.publisher = nil
 		defaultLogger.mu.Unlock()
 	}
 }
@@ -139,6 +165,14 @@ func Log(level Level, format string, args ...interface{}) {
 	case defaultLogger.logCh <- entry:
 	default:
 		// Channel full, drop the log entry for TUI
+	}
+
+	// Call publisher async (daemon mode, e.g. SSE hub)
+	if p := defaultLogger.publisher; p != nil {
+		go func() {
+			defer func() { recover() }()
+			p(entry)
+		}()
 	}
 }
 

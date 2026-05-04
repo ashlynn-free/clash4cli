@@ -63,7 +63,10 @@ jobs:
         run: make deps
 
       - name: Build package
-        run: make linux/amd64
+        run: |
+          set -euo pipefail
+          make linux/amd64
+          test -f dist/clash4cli-linux-amd64-$(cat VERSION)/c4cd
 
       - name: Build deb/rpm
         run: ./scripts/package_nfpm.sh --arch amd64 --packager deb,rpm
@@ -126,7 +129,10 @@ jobs:
         run: make deps
 
       - name: Build package
-        run: make linux/arm64
+        run: |
+          set -euo pipefail
+          make linux/arm64
+          test -f dist/clash4cli-linux-arm64-$(cat VERSION)/c4cd
 
       - name: Build deb/rpm
         run: ./scripts/package_nfpm.sh --arch arm64 --packager deb,rpm
@@ -181,10 +187,16 @@ jobs:
         run: make deps
 
       - name: Build darwin/amd64 package
-        run: make darwin/amd64
+        run: |
+          set -euo pipefail
+          make darwin/amd64
+          test -f dist/clash4cli-darwin-amd64-$(cat VERSION)/c4cd
 
       - name: Build darwin/arm64 package
-        run: make darwin/arm64
+        run: |
+          set -euo pipefail
+          make darwin/arm64
+          test -f dist/clash4cli-darwin-arm64-$(cat VERSION)/c4cd
 
       - name: Upload packages
         uses: actions/upload-artifact@v4

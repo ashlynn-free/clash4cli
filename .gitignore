@@ -2,6 +2,7 @@ RELEASE_TOKEN.txt
 # Binaries (in root directory only)
 /c4c
 /c4cgo
+/c4cd
 /rocket
 /rgo
 *.exe

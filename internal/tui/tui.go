@@ -49,13 +49,21 @@ type splashDoneMsg struct{}
 
 const splashCooldown = 24 * time.Hour
 
+// DaemonLogMsg wraps a logger.Entry from the daemon SSE stream,
+// allowing the Update handler to distinguish daemon-originated logs
+// from local app logs and re-arm the correct listener.
+type DaemonLogMsg struct {
+	Entry logger.Entry
+}
+
 // Model represents the main TUI model
 type Model struct {
 	// Managers
-	cfg        *config.Config
-	subManager *subscription.Manager
-	nodeMgr    *node.Manager
-	slotMgr    *proxy.SlotManager
+	cfg         *config.Config
+	subManager  *subscription.Manager
+	nodeMgr     *node.Manager
+	slotMgr     proxy.SlotService
+	daemonLogCh <-chan logger.Entry
 
 	// UI State
 	activeTab      Tab
@@ -91,12 +99,13 @@ type trafficSnapshot struct {
 }
 
 // New creates a new TUI model
-func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, slotMgr *proxy.SlotManager, version string, startupWarning string) *Model {
+func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, slotMgr proxy.SlotService, daemonLogCh <-chan logger.Entry, version string, startupWarning string) *Model {
 	m := &Model{
 		cfg:             cfg,
 		subManager:      subMgr,
 		nodeMgr:         nodeMgr,
 		slotMgr:         slotMgr,
+		daemonLogCh:     daemonLogCh,
 		statusBar:       components.NewStatusBar(),
 		slotsTab:        tabs.NewSlotsTab(cfg, subMgr, slotMgr, nodeMgr),
 		subsTab:         tabs.NewSubscriptionsTab(subMgr, slotMgr, nodeMgr),
@@ -452,7 +461,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Global keys
 		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys("q"))):
+			m.quitting = true
+			return m, tea.Quit
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
 			if !blockGlobal {
 				m.quitting = true
 				return m, tea.Quit
@@ -490,7 +503,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showSplash {
 			break
 		}
-		slotsFullScreen := m.activeTab == TabSlots && m.slotsTab != nil && m.slotsTab.IsFullScreen()
+		slotsFullScreen := (m.activeTab == TabSlots && m.slotsTab != nil && m.slotsTab.IsFullScreen()) || (m.activeTab == TabSubscriptions && m.subsTab != nil && m.subsTab.IsFullScreen())
 		if slotsFullScreen {
 			break
 		}
@@ -607,12 +620,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logsTab.AddLog("error", msg.Err.Error())
 		}
 
-	case proxy.LogEntry:
-		// Forward to logs tab
-		var cmd tea.Cmd
-		m.logsTab, cmd = m.logsTab.Update(msg)
-		cmds = append(cmds, cmd)
-		// Continue listening for more logs
+	case DaemonLogMsg:
+		m.logsTab.AddLog(msg.Entry.Level.String(), msg.Entry.Message)
 		cmds = append(cmds, m.listenSlotLogs())
 
 	case logger.Entry:
@@ -777,7 +786,12 @@ func (m *Model) View() string {
 	}
 
 	if m.isActiveTabFullScreen() {
-		return m.renderActiveTab()
+		content := m.renderActiveTab()
+		return lipgloss.NewStyle().
+			Width(m.width).
+			Height(m.height).
+			MaxHeight(m.height).
+			Render(content)
 	}
 
 	// Content area
@@ -1024,7 +1038,11 @@ func (m *Model) updateSizes() {
 	} else {
 		m.slotsTab.SetSize(m.width, contentHeight)
 	}
-	m.subsTab.SetSize(m.width, contentHeight)
+	if m.subsTab != nil && m.subsTab.IsFullScreen() {
+		m.subsTab.SetSize(m.width, m.height)
+	} else {
+		m.subsTab.SetSize(m.width, contentHeight)
+	}
 	m.settingsTab.SetSize(m.width, contentHeight)
 	m.logsTab.SetSize(m.width, contentHeight)
 }
@@ -1032,7 +1050,7 @@ func (m *Model) updateSizes() {
 // isActiveTabFullScreen reports whether the current tab has requested full-screen
 // mode, which hides the tab bar and status bar. Add new tabs here as needed.
 func (m *Model) isActiveTabFullScreen() bool {
-	return m.activeTab == TabSlots && m.slotsTab != nil && m.slotsTab.IsFullScreen()
+	return (m.activeTab == TabSlots && m.slotsTab != nil && m.slotsTab.IsFullScreen()) || (m.activeTab == TabSubscriptions && m.subsTab != nil && m.subsTab.IsFullScreen())
 }
 
 // -- Message types --
@@ -1185,9 +1203,8 @@ func (m *Model) pollTraffic() tea.Cmd {
 
 func (m *Model) listenSlotLogs() tea.Cmd {
 	return func() tea.Msg {
-		logCh := m.slotMgr.LogChannel()
-		for log := range logCh {
-			return log
+		for entry := range m.daemonLogCh {
+			return DaemonLogMsg{Entry: entry}
 		}
 		return nil
 	}
