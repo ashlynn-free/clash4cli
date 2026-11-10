@@ -29,10 +29,12 @@ var (
 )
 
 var (
-	verboseMode   = false
-	specifiedPort = 0
-	specifiedSlot = -1     // -1 means auto-detect (first active slot)
-	runMode       = "auto" // auto|proxychains|env
+	verboseMode    = false
+	specifiedPort  = 0
+	specifiedSlot  = -1     // -1 means auto-detect (first active slot)
+	runMode        = "auto" // auto|proxychains|env
+	strictMode     = runtime.GOOS == "darwin"
+	strictExplicit = false
 )
 
 func main() {
@@ -88,6 +90,14 @@ func main() {
 			}
 			specifiedPort = p
 			args = args[2:]
+		case "--strict":
+			strictMode = true
+			strictExplicit = true
+			args = args[1:]
+		case "--no-strict":
+			strictMode = false
+			strictExplicit = true
+			args = args[1:]
 		default:
 			goto runCommand
 		}
@@ -134,6 +144,12 @@ runCommand:
 			slotID = state.SlotID
 		}
 
+		if err := validateSlotEgress(state); err != nil {
+			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: %v\033[0m\n", err)
+			fmt.Fprintf(os.Stderr, "        Refusing to run to prevent direct traffic. Select a node in c4c first.\n")
+			os.Exit(1)
+		}
+
 		port = state.Port
 		if verboseMode {
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] c4cgo %s\033[0m\n", Version)
@@ -175,16 +191,48 @@ runCommand:
 			fmt.Fprintf(os.Stderr, "       Install proxychains4, or use --mode env at your own risk.\n")
 			os.Exit(1)
 		}
-		// On macOS, DYLD injection is blocked for SIP-protected system binaries.
-		if runtime.GOOS == "darwin" {
-			if cmdPath, err := exec.LookPath(args[0]); err == nil && isSIPProtectedDarwinPath(cmdPath) {
-				fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: macOS SIP blocks proxychains for system binary: %s\033[0m\n", cmdPath)
-				fmt.Fprintf(os.Stderr, "       Traffic would NOT be proxied safely.\n")
-				fmt.Fprintf(os.Stderr, "       Install a non-system build (e.g. Homebrew) or use --mode env at your own risk.\n")
+		useProxychains = true
+	}
+
+	// Resolve the real target (following #!/usr/bin/env shims). Refuse commands
+	// that cannot be intercepted: running them would silently leak their traffic.
+	plan, err := resolveRunTarget(args, useProxychains)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: cannot run command: %v\033[0m\n", err)
+		if useProxychains {
+			fmt.Fprintf(os.Stderr, "       Refusing to run: its traffic would bypass the proxy.\n")
+			fmt.Fprintf(os.Stderr, "       Install a non-system build (e.g. Homebrew) or use --mode env at your own risk.\n")
+		}
+		os.Exit(1)
+	}
+
+	// On Linux we inject the library directly. A wrong-architecture preload is
+	// silently ignored by ld.so, so verify the match before running anything.
+	if useProxychains && runtime.GOOS == "linux" && libPath != "" {
+		if err := validatePreload(libPath, plan.Path); err != nil {
+			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: %v\033[0m\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Strict mode is the kernel-level fail-closed sandbox. It is on by default
+	// on macOS; on other platforms --strict is an explicit error.
+	if strictMode {
+		if !strictSandboxSupported() {
+			if strictExplicit {
+				fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: --strict is not supported on this platform\033[0m\n")
+				fmt.Fprintf(os.Stderr, "       On Linux, use mihomo TUN mode for full traffic coverage.\n")
 				os.Exit(1)
 			}
+			strictMode = false
+			fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Warning: strict sandbox unavailable; falling back to best-effort proxychains (UDP/direct traffic is not guaranteed to be blocked).\033[0m\n")
 		}
-		useProxychains = true
+	}
+	if useProxychains && !strictMode {
+		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Warning: proxychains only proxies TCP+DNS; UDP/QUIC/ICMP and non-injectable binaries are not covered.\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\033[33m          Use --strict on macOS or mihomo TUN mode for fail-closed coverage.\033[0m\n")
+	} else if !useProxychains && !strictMode {
+		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Warning: --mode env relies on the app honoring proxy environment variables; traffic may leak.\033[0m\n")
 	}
 
 	if useProxychains {
@@ -192,10 +240,13 @@ runCommand:
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Mode: proxychains4\033[0m\n")
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Binary: %s\033[0m\n", proxychains)
 			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Proxy: socks5://%s:%d\033[0m\n", proxyHost, port)
-			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Command: %s\033[0m\n", args[0])
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Command: %s\033[0m\n", plan.Argv[0])
+			if strictMode {
+				fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Sandbox: strict (block all remote network except the proxy)\033[0m\n")
+			}
 			fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
 		}
-		exitCode, stderr, err := runWithProxychains(proxychains, libPath, proxyHost, port, args)
+		exitCode, stderr, err := runWithProxychains(proxychains, libPath, proxyHost, port, plan.Argv, strictMode)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: proxychains failed - refusing to continue to prevent traffic leak\033[0m\n")
 			if stderr != "" {
@@ -213,10 +264,13 @@ runCommand:
 		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Mode: environment variables (traffic may leak!)\033[0m\n")
 		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] HTTP_PROXY: http://%s:%d\033[0m\n", proxyHost, port)
 		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] ALL_PROXY: socks5://%s:%d\033[0m\n", proxyHost, port)
-		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Command: %s\033[0m\n", args[0])
+		fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Command: %s\033[0m\n", plan.Argv[0])
+		if strictMode {
+			fmt.Fprintf(os.Stderr, "\033[36m[c4cgo] Sandbox: strict (block all remote network except the proxy)\033[0m\n")
+		}
 		fmt.Fprintf(os.Stderr, "\033[90m─────────────────────────────────────\033[0m\n")
 	}
-	exitCode, _ := runWithEnvProxy(proxyHost, port, args)
+	exitCode, _ := runWithEnvProxy(proxyHost, port, plan.Argv, strictMode)
 	os.Exit(exitCode)
 }
 
@@ -231,6 +285,9 @@ Options:
   -s, --slot N   Use proxy from slot N (0-9, default: first active slot)
   --port PORT    Specify proxy port (default: read from c4cd runtime)
   --mode MODE    Run mode: auto|proxychains|env (default: auto)
+  --strict       Fail closed: block all remote network except the proxy
+                 (default on macOS; unsupported on Linux — use TUN instead)
+  --no-strict    Disable the fail-closed sandbox (UDP/direct traffic may leak)
   -v, --verbose  Show detailed status messages before running command
   --version      Show version
   -h, --help     Show this help
@@ -241,8 +298,15 @@ Examples:
   c4cgo -s 0 curl https://ip.sb
   c4cgo --port 17890 wget https://example.com/file.zip
   c4cgo --mode env curl https://ip.sb
+  c4cgo --no-strict npm install
   c4cgo git clone https://github.com/user/repo.git
   c4cgo -v curl https://ip.sb                        Show proxy details
+
+Safety:
+  proxychains only intercepts TCP and DNS. Without --strict, UDP/QUIC/ICMP
+  and statically linked/setuid binaries can bypass the proxy. On macOS,
+  --strict uses a kernel sandbox to deny all remote network except the proxy,
+  so leaks fail closed. On Linux, use mihomo TUN mode for full coverage.
 
 Note: Make sure c4cd is running and a slot is active.
 `, Version)
@@ -614,11 +678,19 @@ func firstLine(s string) string {
 	return ""
 }
 
-func runWithProxychains(proxychains, libPath string, host string, port int, args []string) (int, string, error) {
+func runWithProxychains(proxychains, libPath string, host string, port int, targetArgs []string, strict bool) (int, string, error) {
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	// Create proxychains config
+	// Write the config with a private, unpredictable name (0600). A predictable
+	// 0644 file in /tmp could be pre-created as a symlink and clobbered.
+	configFile, err := os.CreateTemp("", "c4cgo-proxychains-*.conf")
+	if err != nil {
+		return 1, "", fmt.Errorf("failed to create proxychains config: %w", err)
+	}
+	configPath := configFile.Name()
+	defer os.Remove(configPath)
+
 	configContent := fmt.Sprintf(`# Generated by c4cgo
 quiet_mode
 strict_chain
@@ -630,60 +702,67 @@ tcp_connect_time_out 8000
 [ProxyList]
 socks5 %s %d
 `, host, port)
-
-	// Write config to temp file
-	tmpDir := os.TempDir()
-	configPath := filepath.Join(tmpDir, fmt.Sprintf("c4cgo_proxychains_%d.conf", os.Getpid()))
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if _, err := configFile.WriteString(configContent); err != nil {
+		configFile.Close()
 		return 1, "", fmt.Errorf("failed to write proxychains config: %w", err)
 	}
-	defer os.Remove(configPath)
-
-	var cmd *exec.Cmd
-	env := os.Environ()
-
-	// On macOS, prefer running proxychains4 wrapper to ensure correct DYLD settings.
-	// (Direct DYLD injection is fragile and can be blocked by SIP for system binaries.)
-	if runtime.GOOS == "darwin" {
-		cmdArgs := append([]string{"-q", "-f", configPath}, args...)
-		cmd = exec.Command(proxychains, cmdArgs...)
-	} else if libPath != "" {
-		// If we have the library path, skip proxychains4 binary and use LD_PRELOAD directly
-		// This avoids proxychains4 trying to find the library again with its own logic
-		// Run target command directly with LD_PRELOAD
-		cmd = exec.Command(args[0], args[1:]...)
-		env = append(env, "PROXYCHAINS_CONF_FILE="+configPath)
-		libDir := filepath.Dir(libPath)
-		if runtime.GOOS == "darwin" {
-			env = append(env, "DYLD_INSERT_LIBRARIES="+libPath)
-			env = append(env, "DYLD_LIBRARY_PATH="+libDir)
-		} else {
-			env = append(env, "LD_PRELOAD="+libPath)
-			env = append(env, "LD_LIBRARY_PATH="+libDir)
-		}
-	} else {
-		// No library path, use proxychains4 binary normally (it will handle LD_PRELOAD)
-		cmdArgs := append([]string{"-q", "-f", configPath}, args...)
-		cmd = exec.Command(proxychains, cmdArgs...)
+	if err := configFile.Close(); err != nil {
+		return 1, "", fmt.Errorf("failed to write proxychains config: %w", err)
 	}
 
+	// Drop inherited loader/proxy variables so the child cannot shadow the
+	// injection we set here (getenv returns the first duplicate).
+	oldLibPath := os.Getenv("LD_LIBRARY_PATH")
+	env := sanitizeProxyEnv(sanitizeLoaderEnv(os.Environ()))
+
+	var argv []string
+	if runtime.GOOS == "darwin" || libPath == "" {
+		// Use the proxychains4 wrapper; it sets the correct DYLD/LD variables.
+		argv = append([]string{proxychains, "-q", "-f", configPath}, targetArgs...)
+	} else {
+		// Skip the wrapper and inject the library directly. This avoids
+		// proxychains4 re-discovering the library with its own logic.
+		argv = append([]string{targetArgs[0]}, targetArgs[1:]...)
+		libDir := filepath.Dir(libPath)
+		libPathValue := libDir
+		if oldLibPath != "" {
+			libPathValue = libDir + string(os.PathListSeparator) + oldLibPath
+		}
+		env = append(env,
+			"PROXYCHAINS_CONF_FILE="+configPath,
+			"LD_PRELOAD="+libPath,
+			"LD_LIBRARY_PATH="+libPathValue,
+		)
+	}
+
+	if strict {
+		wrapped, err := strictSandboxCommand(argv, port)
+		if err != nil {
+			return 1, "", err
+		}
+		argv = wrapped
+	}
+
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = io.MultiWriter(newProxychainsBannerFilter(os.Stderr), &stderrBuf)
-	cmd.Env = env
 
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return exitErr.ExitCode(), stderrBuf.String(), err
+			// The target ran and returned a non-zero status; that is not a
+			// proxychains failure.
+			return exitErr.ExitCode(), stderrBuf.String(), nil
 		}
 		return 1, stderrBuf.String(), err
 	}
 	return 0, stderrBuf.String(), nil
 }
 
-func runWithEnvProxy(host string, port int, args []string) (int, error) {
+func runWithEnvProxy(host string, port int, targetArgs []string, strict bool) (int, error) {
 	if host == "" {
 		host = "127.0.0.1"
 	}
@@ -691,8 +770,10 @@ func runWithEnvProxy(host string, port int, args []string) (int, error) {
 	httpProxy := "http://" + hostPort
 	socksProxy := "socks5://" + hostPort
 
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = append(os.Environ(),
+	// Remove inherited proxy variables first; otherwise the child may see the
+	// parent's (possibly stale or direct) proxy settings instead of ours.
+	env := sanitizeProxyEnv(os.Environ())
+	env = append(env,
 		"HTTP_PROXY="+httpProxy,
 		"HTTPS_PROXY="+httpProxy,
 		"http_proxy="+httpProxy,
@@ -702,6 +783,18 @@ func runWithEnvProxy(host string, port int, args []string) (int, error) {
 		"NO_PROXY=localhost,127.0.0.1,::1",
 		"no_proxy=localhost,127.0.0.1,::1",
 	)
+
+	argv := append([]string(nil), targetArgs...)
+	if strict {
+		wrapped, err := strictSandboxCommand(argv, port)
+		if err != nil {
+			return 1, err
+		}
+		argv = wrapped
+	}
+
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -709,7 +802,7 @@ func runWithEnvProxy(host string, port int, args []string) (int, error) {
 	err := cmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return exitErr.ExitCode(), err
+			return exitErr.ExitCode(), nil
 		}
 		return 1, err
 	}
@@ -722,6 +815,10 @@ func isSIPProtectedDarwinPath(p string) bool {
 	if runtime.GOOS != "darwin" {
 		return false
 	}
+	return isSIPProtectedPath(p)
+}
+
+func isSIPProtectedPath(p string) bool {
 	clean := filepath.Clean(p)
 	protectedPrefixes := []string{
 		"/usr/bin/",

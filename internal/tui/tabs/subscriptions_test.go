@@ -10,6 +10,7 @@ import (
 )
 
 func TestSubscriptionsTab_EnterOpensNodeBrowser(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
 	subMgr := subscription.NewManager()
 	_, err := subMgr.AddManual("sub", "ss://YWVzLTEyOC1nY206cGFzcw==@example.com:8388#NodeA\n")
 	if err != nil {
@@ -39,6 +40,7 @@ func TestSubscriptionsTab_EnterOpensNodeBrowser(t *testing.T) {
 }
 
 func TestSubscriptionsTab_EscClosesNodeBrowser(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
 	subMgr := subscription.NewManager()
 	_, err := subMgr.AddManual("sub", "ss://YWVzLTEyOC1nY206cGFzcw==@example.com:8388#NodeA\n")
 	if err != nil {

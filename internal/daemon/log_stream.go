@@ -48,6 +48,18 @@ func (h *logStreamHub) publish(entry logger.Entry) {
 	h.mu.Unlock()
 }
 
+// closeAll terminates every active log stream. http.Server.Shutdown waits for
+// handlers to return; without this an open SSE stream would block shutdown
+// until the shutdown context expires.
+func (h *logStreamHub) closeAll() {
+	h.mu.Lock()
+	for id, ch := range h.subscribers {
+		delete(h.subscribers, id)
+		close(ch)
+	}
+	h.mu.Unlock()
+}
+
 func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

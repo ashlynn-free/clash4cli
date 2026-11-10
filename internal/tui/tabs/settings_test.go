@@ -1,7 +1,9 @@
 package tabs
 
 import (
+	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -9,51 +11,302 @@ import (
 	"rocket4cli/internal/proxy"
 )
 
-func TestSettingsTab_FocusSkipsHeaderAndDisabledFields(t *testing.T) {
+func TestSettingsTab_FocusSkipsHeadersAndDisabledFields(t *testing.T) {
 	cfg := config.DefaultConfig()
 	tab := NewSettingsTab(cfg, nil, "dev")
 
-	// 0 -> 1 (reset_port button)
-	tab.focusNext()
-	if tab.focusedField != 1 {
-		t.Fatalf("expected focusedField=1, got %d", tab.focusedField)
-	}
-	if tab.fields[tab.focusedField].key != "reset_port" {
-		t.Fatalf("expected key reset_port, got %q", tab.fields[tab.focusedField].key)
+	if got := tab.fields[tab.focusedField].key; got != "mixed_port" {
+		t.Fatalf("expected initial focus mixed_port, got %q", got)
 	}
 
-	// 1 -> 2 (allow_lan)
 	tab.focusNext()
-	if tab.fields[tab.focusedField].key != "allow_lan" {
-		t.Fatalf("expected key allow_lan, got %q", tab.fields[tab.focusedField].key)
+	if got := tab.fields[tab.focusedField].key; got != "reset_port" {
+		t.Fatalf("expected key reset_port, got %q", got)
 	}
 
-	// 2 -> 3 (update_via_proxy)
 	tab.focusNext()
-	if tab.fields[tab.focusedField].key != "update_via_proxy" {
-		t.Fatalf("expected to focus update_via_proxy, got %q", tab.fields[tab.focusedField].key)
+	if got := tab.fields[tab.focusedField].key; got != "allow_lan" {
+		t.Fatalf("expected key allow_lan, got %q", got)
 	}
 
-	// 3 -> (skip header) -> edit_upstream_proxies
 	tab.focusNext()
-	if tab.fields[tab.focusedField].key != "edit_upstream_proxies" {
-		t.Fatalf("expected to focus edit_upstream_proxies, got %q", tab.fields[tab.focusedField].key)
+	if got := tab.fields[tab.focusedField].key; got != "update_via_proxy" {
+		t.Fatalf("expected to focus update_via_proxy, got %q", got)
 	}
 
-	// edit_upstream_proxies -> (skip header) -> system_proxy_enabled on darwin, tun_enabled on linux, otherwise language
 	tab.focusNext()
-	if runtime.GOOS == "darwin" {
-		if tab.fields[tab.focusedField].key != "system_proxy_enabled" {
-			t.Fatalf("expected to focus system_proxy_enabled on darwin, got %q", tab.fields[tab.focusedField].key)
+	if got := tab.fields[tab.focusedField].key; got != "edit_upstream_proxies" {
+		t.Fatalf("expected headers to be skipped, got %q", got)
+	}
+
+	tab.focusPrev()
+	if got := tab.fields[tab.focusedField].key; got != "update_via_proxy" {
+		t.Fatalf("expected focus to move back to update_via_proxy, got %q", got)
+	}
+}
+
+func TestSettingsTab_FocusWrapsThroughRestartButton(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+
+	last := fieldIndexByKey(tab.fields, "show_logs")
+	if last < 0 {
+		t.Fatal("expected show_logs field")
+	}
+	tab.focusField(last)
+
+	tab.focusNext()
+	if tab.focusedField != len(tab.fields) {
+		t.Fatalf("expected restart core virtual button, got index %d", tab.focusedField)
+	}
+
+	tab.focusNext()
+	if got := tab.fields[tab.focusedField].key; got != "mixed_port" {
+		t.Fatalf("expected focus to wrap to mixed_port, got %q", got)
+	}
+}
+
+func TestSettingsTab_ArrowKeysMoveThroughFlatList(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_ = cmd
+
+	if got := tab.fields[tab.focusedField].key; got != "reset_port" {
+		t.Fatalf("expected down to move to reset_port, got %q", got)
+	}
+}
+
+func TestSettingsTab_SelectFieldKeepsViRightKey(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+
+	speedUnitIndex := tab.fieldIndexByKey("speed_unit")
+	if speedUnitIndex < 0 {
+		t.Fatal("expected speed_unit field")
+	}
+	tab.setFocusedField(speedUnitIndex)
+	before := tab.fields[speedUnitIndex].selectedIdx
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+
+	if cmd == nil {
+		t.Fatal("expected select change to save")
+	}
+	if got := tab.fields[speedUnitIndex].selectedIdx; got == before {
+		t.Fatalf("expected selection to advance, still at %d", got)
+	}
+
+	tab, _ = tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	if tab.activeSubPage != settingsSubPageLogs {
+		t.Fatalf("expected uppercase L to open logs subpage, got %d", tab.activeSubPage)
+	}
+}
+
+func TestSettingsTab_MovingFocusSavesChangedInput(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+
+	field := tab.fieldByKey("mixed_port")
+	if field == nil {
+		t.Fatalf("expected mixed_port field")
+	}
+	field.input.SetValue("17891")
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd == nil {
+		t.Fatalf("expected changed input to trigger save when moving focus")
+	}
+	msg := cmd()
+	if _, ok := msg.(portChangedSaveMsg); !ok {
+		t.Fatalf("expected portChangedSaveMsg, got %#v", msg)
+	}
+	if cfg.Proxy.MixedPort != 17891 {
+		t.Fatalf("expected mixed port saved, got %d", cfg.Proxy.MixedPort)
+	}
+}
+
+func TestSettingsTab_EnterOnSystemInfoOpensSubpage(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.SetSize(100, 24)
+
+	index := fieldIndexByKey(tab.fields, "system_info")
+	if index < 0 {
+		t.Fatal("expected system_info field")
+	}
+	tab.setFocusedField(index)
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected system info fetch command")
+	}
+	if tab.activeSubPage != settingsSubPageSystemInfo {
+		t.Fatalf("expected system info subpage, got %d", tab.activeSubPage)
+	}
+	if !strings.Contains(tab.View(), "System Info") {
+		t.Fatalf("expected System Info to render")
+	}
+}
+
+func TestSettingsTab_UpstreamButtonOpensList(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AddUpstreamProxy(config.UpstreamProxyEntry{
+		Label:    "VPN 1",
+		Protocol: "http",
+		Server:   "vpn1.example.com",
+		Port:     8080,
+	})
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.SetSize(100, 24)
+
+	index := fieldIndexByKey(tab.fields, "edit_upstream_proxies")
+	if index < 0 {
+		t.Fatal("expected edit_upstream_proxies field")
+	}
+	tab.setFocusedField(index)
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected opening upstream list not to trigger a command")
+	}
+	if tab.activeSubPage != settingsSubPageUpstreamList {
+		t.Fatalf("expected upstream list subpage, got %d", tab.activeSubPage)
+	}
+
+	view := tab.View()
+	if !strings.Contains(view, "VPN 1") || !strings.Contains(view, "[+ Add new upstream proxy]") {
+		t.Fatalf("expected upstream list to render\n%s", view)
+	}
+
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_ = cmd
+	if tab.upstreamListIndex != 1 {
+		t.Fatalf("expected down to move upstream list selection, got %d", tab.upstreamListIndex)
+	}
+}
+
+func TestSettingsTab_UpstreamDeleteFromSubpage(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+
+	cfg := config.DefaultConfig()
+	id := cfg.AddUpstreamProxy(config.UpstreamProxyEntry{
+		Label:    "VPN 1",
+		Protocol: "http",
+		Server:   "vpn1.example.com",
+		Port:     8080,
+	})
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.activeSubPage = settingsSubPageUpstreamList
+
+	tab, _ = tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+	if _, ok := cfg.GetUpstreamProxy(id); ok {
+		t.Fatal("expected selected upstream proxy to be deleted")
+	}
+	if tab.activeSubPage != settingsSubPageUpstreamList {
+		t.Fatalf("expected delete to remain in upstream list, got %d", tab.activeSubPage)
+	}
+}
+
+func TestSettingsTab_RestartCoreRendersInFlatView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.SetSize(100, 100)
+
+	if !strings.Contains(tab.View(), "Restart core") {
+		t.Fatalf("expected flat view to include restart core")
+	}
+}
+
+func TestSettingsTab_FlatViewShowsSections(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.SetSize(100, 60)
+
+	view := tab.View()
+	for _, want := range []string{"Proxy", "Upstream Proxies", "Display", "System", "View Logs >"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected view to contain %q\n%s", want, view)
 		}
-	} else if runtime.GOOS == "linux" {
-		if tab.fields[tab.focusedField].key != "tun_enabled" {
-			t.Fatalf("expected to focus tun_enabled on linux, got %q", tab.fields[tab.focusedField].key)
-		}
-	} else {
-		if tab.fields[tab.focusedField].key != "language" {
-			t.Fatalf("expected to skip disabled system proxy/tun fields and focus language, got %q", tab.fields[tab.focusedField].key)
-		}
+	}
+}
+
+func TestSettingsTab_PlatformFieldsAreFiltered(t *testing.T) {
+	tab := NewSettingsTab(config.DefaultConfig(), nil, "dev")
+
+	has := func(key string) bool {
+		return tab.fieldByKey(key) != nil
+	}
+	if got, want := has("system_proxy_settings"), runtime.GOOS == "darwin"; got != want {
+		t.Fatalf("system proxy fields present=%v, want %v", got, want)
+	}
+	if got, want := has("docker_redirect_tcp"), runtime.GOOS == "linux"; got != want {
+		t.Fatalf("docker field present=%v, want %v", got, want)
+	}
+	wantTUN := (runtime.GOOS == "linux" || runtime.GOOS == "darwin") && os.Geteuid() == 0
+	if got := has("tun_settings"); got != wantTUN {
+		t.Fatalf("TUN field present=%v, want %v", got, wantTUN)
+	}
+}
+
+func TestSettingsTab_SubpageEscReturnsToMain(t *testing.T) {
+	tab := NewSettingsTab(config.DefaultConfig(), nil, "dev")
+	tab.SetSize(100, 100)
+	tab.loadUpstreamDraft("")
+	tab.activeSubPage = settingsSubPageUpstreamDetail
+
+	if !strings.Contains(tab.View(), "New Upstream Proxy") {
+		t.Fatalf("expected upstream detail to render\n%s", tab.View())
+	}
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_ = cmd
+	if tab.activeSubPage != settingsSubPageUpstreamList {
+		t.Fatalf("expected Esc from downstream detail to return to list, got %d", tab.activeSubPage)
+	}
+
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_ = cmd
+	if tab.activeSubPage != settingsSubPageNone {
+		t.Fatalf("expected Esc from list to return to main view, got %d", tab.activeSubPage)
+	}
+	if !strings.Contains(tab.View(), "View Logs >") {
+		t.Fatalf("expected main flat view to render")
+	}
+}
+
+func TestSettingsTab_LogsSubpageUsesMainLogsTab(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.SetSize(100, 24)
+	tab.logsTab.AddLog("info", "hello from settings logs")
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	if cmd != nil {
+		t.Fatalf("expected logs shortcut not to trigger a command")
+	}
+	if tab.activeSubPage != settingsSubPageLogs {
+		t.Fatalf("expected logs subpage, got %d", tab.activeSubPage)
+	}
+	if !strings.Contains(tab.View(), "hello from settings logs") {
+		t.Fatalf("expected logs view to render inside settings\n%s", tab.View())
+	}
+
+	tab, _ = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if tab.activeSubPage != settingsSubPageNone {
+		t.Fatalf("expected Esc to close logs subpage, got %d", tab.activeSubPage)
 	}
 }
 
@@ -123,17 +376,26 @@ func TestSettingsTab_UpstreamProxiesNavigation(t *testing.T) {
 	})
 
 	tab := NewSettingsTab(cfg, nil, "dev")
-	tab.focusedField = fieldIndexByKey(tab.fields, "edit_upstream_proxies")
+	tab.activeSubPage = settingsSubPageUpstreamList
 
 	var cmd tea.Cmd
 	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = cmd
 
-	if !tab.showUpstreamList {
-		t.Fatalf("expected upstream list to open")
+	if tab.activeSubPage != settingsSubPageUpstreamDetail {
+		t.Fatalf("expected enter on upstream list to edit selected entry")
+	}
+	if tab.upstreamDetailID == "" {
+		t.Fatalf("expected existing upstream ID when editing selected entry")
 	}
 
-	// Navigate down to "Add new" button
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_ = cmd
+	if tab.activeSubPage != settingsSubPageUpstreamList {
+		t.Fatalf("expected upstream detail to return to list")
+	}
+
+	// Navigate down to "Add new" button.
 	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_ = cmd
 	if tab.upstreamListIndex != 1 {
@@ -143,7 +405,7 @@ func TestSettingsTab_UpstreamProxiesNavigation(t *testing.T) {
 	// Enter to add new
 	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = cmd
-	if !tab.showUpstreamDetail {
+	if tab.activeSubPage != settingsSubPageUpstreamDetail {
 		t.Fatalf("expected upstream detail to open for new entry")
 	}
 	if tab.upstreamDetailID != "" {
@@ -153,18 +415,8 @@ func TestSettingsTab_UpstreamProxiesNavigation(t *testing.T) {
 	// Back to list
 	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	_ = cmd
-	if tab.showUpstreamDetail {
-		t.Fatalf("expected upstream detail to close")
-	}
-	if !tab.showUpstreamList {
-		t.Fatalf("expected upstream list to remain open")
-	}
-
-	// Back to main settings
-	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	_ = cmd
-	if tab.showUpstreamList {
-		t.Fatalf("expected upstream list to close")
+	if tab.activeSubPage != settingsSubPageUpstreamList {
+		t.Fatalf("expected upstream detail to return to list")
 	}
 }
 
@@ -174,7 +426,7 @@ func TestSettingsTab_SaveSettingsPersistsTunAdvancedFields(t *testing.T) {
 
 	tunEnabled := tab.fieldByKey("tun_enabled")
 	if tunEnabled == nil {
-		t.Fatalf("expected tun_enabled field")
+		t.Skip("TUN settings are unavailable on this platform/user")
 	}
 	tunEnabled.selectedIdx = 0
 
@@ -284,7 +536,7 @@ func TestSettingsTab_TunSubpageBackspaceDoesNotExit(t *testing.T) {
 	tab := NewSettingsTab(cfg, nil, "dev")
 	tab.tunFields = tab.newTunSettingsFields()
 	tab.loadTunDraft()
-	tab.showTunSettings = true
+	tab.activeSubPage = settingsSubPageTUN
 	tab.tunFocusedField = fieldIndexByKey(tab.tunFields, "tun_device")
 	field := &tab.tunFields[tab.tunFocusedField]
 	field.input.Focus()
@@ -295,11 +547,61 @@ func TestSettingsTab_TunSubpageBackspaceDoesNotExit(t *testing.T) {
 	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	_ = cmd
 
-	if !tab.showTunSettings {
+	if tab.activeSubPage != settingsSubPageTUN {
 		t.Fatalf("expected TUN subpage to remain open on backspace")
 	}
 	if got := field.input.Value(); got != "utun12" {
 		t.Fatalf("expected backspace to edit input, got %q", got)
+	}
+}
+
+func TestSettingsTab_TunNavigationWithoutChangesDoesNotRestartOrExit(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.tunFields = tab.newTunSettingsFields()
+	tab.loadTunDraft()
+	tab.activeSubPage = settingsSubPageTUN
+
+	var cmd tea.Cmd
+	tab, cmd = tab.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd == nil {
+		t.Fatal("expected navigation to return the deferred change check")
+	}
+	if msg := cmd(); msg != nil {
+		t.Fatalf("expected unchanged TUN draft to emit no message, got %#v", msg)
+	}
+	if tab.activeSubPage != settingsSubPageTUN {
+		t.Fatalf("expected TUN subpage to remain open, got %d", tab.activeSubPage)
+	}
+}
+
+func TestSettingsTab_TunChangeRestartsWithoutClosingSubpage(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.tunFields = tab.newTunSettingsFields()
+	tab.loadTunDraft()
+	tab.activeSubPage = settingsSubPageTUN
+
+	stack := tab.tunFieldByKey("tun_stack")
+	if stack == nil || len(stack.options) < 2 {
+		t.Fatal("expected multiple TUN stack options")
+	}
+	stack.selectedIdx = (stack.selectedIdx + 1) % len(stack.options)
+
+	msg := tab.saveTunSettings()()
+	changed, ok := msg.(tunChangedSaveMsg)
+	if !ok {
+		t.Fatalf("expected tunChangedSaveMsg, got %#v", msg)
+	}
+	tab, cmd := tab.Update(changed)
+
+	if tab.activeSubPage != settingsSubPageTUN {
+		t.Fatalf("expected TUN subpage to remain open, got %d", tab.activeSubPage)
+	}
+	if cmd == nil {
+		t.Fatal("expected changed TUN settings to schedule restart feedback")
 	}
 }
 
@@ -312,6 +614,33 @@ func fieldIndexByKey(fields []settingField, key string) int {
 	return -1
 }
 
+func TestMoveFieldFocus_AllDisabledKeepsCurrentIndex(t *testing.T) {
+	tab := &SettingsTab{}
+	fields := []settingField{
+		{fieldType: FieldTypeHeader},
+		{fieldType: FieldTypeSelect, disabled: true},
+	}
+	current := 1
+
+	tab.moveFieldFocus(fields, &current, 1)
+
+	if current != 1 {
+		t.Fatalf("expected focus to stay at 1, got %d", current)
+	}
+}
+
+func TestAdjustScrollOffsetClampsToViewport(t *testing.T) {
+	if got := adjustScrollOffset(0, -5, 4, 10); got != 0 {
+		t.Fatalf("expected negative offset to clamp to 0, got %d", got)
+	}
+	if got := adjustScrollOffset(9, 0, 4, 10); got != 6 {
+		t.Fatalf("expected focus at bottom to scroll to 6, got %d", got)
+	}
+	if got := adjustScrollOffset(2, 20, 4, 3); got != 0 {
+		t.Fatalf("expected short content to clamp to 0, got %d", got)
+	}
+}
+
 func TestSettingsTab_SaveSettingsTriggersTunRestart(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.TunEnabled = false
@@ -319,7 +648,7 @@ func TestSettingsTab_SaveSettingsTriggersTunRestart(t *testing.T) {
 
 	tunField := tab.fieldByKey("tun_enabled")
 	if tunField == nil {
-		t.Fatalf("expected tun_enabled field")
+		t.Skip("TUN settings are unavailable on this platform/user")
 	}
 	if tunField.selectedIdx != 1 {
 		tunField.selectedIdx = 1

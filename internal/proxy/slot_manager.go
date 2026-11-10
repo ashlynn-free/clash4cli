@@ -398,14 +398,26 @@ func (sm *SlotManager) HasRunningSlots() bool {
 	return sm.ActiveSlotCount() > 0
 }
 
-// StopAll stops all running slots.
+// StopAll stops all running slots concurrently so daemon shutdown stays quick.
 func (sm *SlotManager) StopAll() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	var wg sync.WaitGroup
+	for i := 0; i < MaxSlots; i++ {
+		if sm.slots[i] == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(sc *SlotController) {
+			defer wg.Done()
+			_ = sc.Stop()
+		}(sm.slots[i])
+	}
+	wg.Wait()
+
 	for i := 0; i < MaxSlots; i++ {
 		if sm.slots[i] != nil {
-			_ = sm.slots[i].Stop()
 			sm.cleanSlotLocked(i)
 		}
 	}

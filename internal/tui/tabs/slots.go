@@ -94,6 +94,7 @@ type SlotsTab struct {
 	messageType        string
 	slotRegions        [proxy.MaxSlots]string
 	slotLatencies      [proxy.MaxSlots]int64
+	slotTesting        [proxy.MaxSlots]bool
 	slotTraffic        [proxy.MaxSlots]*SlotTrafficInfo
 	lastTestTime       time.Time
 }
@@ -140,7 +141,6 @@ func (t *SlotsTab) BlocksGlobalKeys() bool {
 func (t *SlotsTab) IsFullScreen() bool {
 	return t != nil && t.view == slotsViewProxyPicker
 }
-
 
 // SetSize updates layout dimensions.
 func (t *SlotsTab) SetSize(width, height int) {
@@ -189,12 +189,15 @@ func (t *SlotsTab) Update(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 		}
 		return t, nil
 	case SlotTestResultMsg:
-		if msg.SlotID >= 0 && msg.SlotID < proxy.MaxSlots && msg.Err == nil {
-			t.slotRegions[msg.SlotID] = msg.Region
-			t.slotLatencies[msg.SlotID] = msg.Latency
-			t.cfg.SetSlotLastLatency(msg.SlotID, msg.Latency)
-			t.cfg.SetSlotLastRegion(msg.SlotID, msg.Region)
-			_ = t.cfg.Save()
+		if msg.SlotID >= 0 && msg.SlotID < proxy.MaxSlots {
+			t.slotTesting[msg.SlotID] = false
+			if msg.Err == nil {
+				t.slotRegions[msg.SlotID] = msg.Region
+				t.slotLatencies[msg.SlotID] = msg.Latency
+				t.cfg.SetSlotLastLatency(msg.SlotID, msg.Latency)
+				t.cfg.SetSlotLastRegion(msg.SlotID, msg.Region)
+				_ = t.cfg.Save()
+			}
 		}
 		return t, nil
 	}
@@ -262,6 +265,12 @@ func (t *SlotsTab) updateList(msg tea.Msg) (*SlotsTab, tea.Cmd) {
 				t.view = slotsViewUpstreamPicker
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
+			if time.Since(t.lastTestTime) < 2*time.Second {
+				return t, nil
+			}
+			t.lastTestTime = time.Now()
+			return t, t.testSlot(t.selectedSlotID())
+		case key.Matches(msg, key.NewBinding(key.WithKeys("T"))):
 			if time.Since(t.lastTestTime) < 2*time.Second {
 				return t, nil
 			}
@@ -421,7 +430,8 @@ func (t *SlotsTab) viewList() string {
 	help := styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" switch  ") +
 		styles.HelpKey.Render("←→") + styles.HelpText.Render(" focus  ") +
 		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" edit  ") +
-		styles.HelpKey.Render("t") + styles.HelpText.Render(" test all  ") +
+		styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
+		styles.HelpKey.Render("T") + styles.HelpText.Render(" test all  ") +
 		styles.HelpKey.Render("Space") + styles.HelpText.Render(" on/off  ") +
 		styles.HelpKey.Render("D") + styles.HelpText.Render(" disconnect all")
 	lines = append(lines, "", help)
@@ -587,6 +597,28 @@ func (t *SlotsTab) prepareManualPortInput() {
 	t.manualPortInput.SetCursor(len(t.manualPortInput.Value()))
 }
 
+func (t *SlotsTab) testSlot(slotID int) tea.Cmd {
+	running := t.slotMgr != nil && t.slotMgr.GetSlotState(slotID) != nil
+	ready, _ := t.slotReady(slotID)
+	if !running && !ready {
+		return nil
+	}
+
+	t.slotTesting[slotID] = true
+	cfg := t.cfg
+	subMgr := t.subManager
+	slotMgr := t.slotMgr
+	return func() tea.Msg {
+		result := proxy.SlotTest(cfg, subMgr, slotMgr, slotID, 5*time.Second)
+		return SlotTestResultMsg{
+			SlotID:  slotID,
+			Latency: result.Latency,
+			Region:  result.Region,
+			Err:     result.Err,
+		}
+	}
+}
+
 func (t *SlotsTab) testAllSlotNodes() tea.Cmd {
 	var cmds []tea.Cmd
 	for slotID := 0; slotID < proxy.MaxSlots; slotID++ {
@@ -596,6 +628,7 @@ func (t *SlotsTab) testAllSlotNodes() tea.Cmd {
 			continue
 		}
 		sid := slotID
+		t.slotTesting[sid] = true
 		cfg := t.cfg
 		subMgr := t.subManager
 		slotMgr := t.slotMgr
@@ -616,7 +649,7 @@ func (t *SlotsTab) testAllSlotNodes() tea.Cmd {
 }
 
 func (t *SlotsTab) saveAndMaybeRestart(slotID int) tea.Cmd {
-	if err := t.cfg.Save(); err != nil {
+	if err := persistConfig(t.cfg, t.slotMgr); err != nil {
 		t.setMessage(err.Error(), "error")
 		return nil
 	}
@@ -949,21 +982,8 @@ func (t *SlotsTab) renderSlotCard(slotID int, cardWidth int, selected bool) stri
 	)
 
 	// Line 2: flow chain on the left, region + latency on the right
-	// Build right-side info: "region latency"
-	regionText := t.slotRegions[slotID]
-	if regionText == "" {
-		regionText = t.cfg.GetSlotLastRegion(slotID)
-	}
-	latencyText := t.slotLatencyText(slotID)
-	var rightInfo string
-	switch {
-	case regionText != "" && latencyText != "":
-		rightInfo = styles.Muted.Render(regionText) + " " + latencyText
-	case latencyText != "":
-		rightInfo = latencyText
-	case regionText != "":
-		rightInfo = styles.Muted.Render(regionText)
-	}
+	// Build right-side info: "region latency" (or "Testing..." while in flight)
+	rightInfo := t.slotRegionLatencyInfo(slotID)
 	rightWidth := lipgloss.Width(rightInfo)
 
 	// Flow line gets the remaining width
@@ -1027,8 +1047,38 @@ func (t *SlotsTab) slotLatencyText(slotID int) string {
 		return styles.FormatLatency(t.slotLatencies[slotID])
 	}
 	// Fallback to persisted cache
-	if cached := t.cfg.GetSlotLastLatency(slotID); cached != 0 {
-		return styles.FormatLatency(cached)
+	if t.cfg != nil {
+		if cached := t.cfg.GetSlotLastLatency(slotID); cached != 0 {
+			return styles.FormatLatency(cached)
+		}
+	}
+	return ""
+}
+
+// slotRegionLatencyInfo renders the right-side "region latency" info. While a
+// test for this slot is running it shows "Testing..." instead of stale values.
+func (t *SlotsTab) slotRegionLatencyInfo(slotID int) string {
+	if slotID < 0 || slotID >= proxy.MaxSlots {
+		return ""
+	}
+	if t.slotTesting[slotID] {
+		return styles.NodeTesting.Render(i18n.M().Nodes.Testing)
+	}
+	if t.cfg == nil {
+		return ""
+	}
+	regionText := t.slotRegions[slotID]
+	if regionText == "" {
+		regionText = t.cfg.GetSlotLastRegion(slotID)
+	}
+	latencyText := t.slotLatencyText(slotID)
+	switch {
+	case regionText != "" && latencyText != "":
+		return styles.Muted.Render(regionText) + " " + latencyText
+	case latencyText != "":
+		return latencyText
+	case regionText != "":
+		return styles.Muted.Render(regionText)
 	}
 	return ""
 }

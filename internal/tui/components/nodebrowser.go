@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -74,6 +75,7 @@ type NodeBrowser struct {
 	testing    bool
 	cancelTest context.CancelFunc
 	resultCh   <-chan node.TestResult
+	pending    map[string]struct{}
 
 	scrollStates    map[string]scrollState
 	slotIndicators  map[string]SlotIndicator
@@ -109,6 +111,7 @@ func (b *NodeBrowser) Open(subID string, preselect *subscription.Node, mode Brow
 	b.showDetail = false
 	b.detailView = nil
 	b.testing = false
+	b.pending = nil
 
 	if b.cfg != nil {
 		b.serverDisplay = b.cfg.UI.ServerDisplay
@@ -288,6 +291,8 @@ func (b *NodeBrowser) Update(msg tea.Msg) (NodeBrowserEvent, *NodeBrowserSelecte
 			}
 			// Browse mode: enter does nothing (use i for detail).
 		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
+			return EventNone, nil, b.testSelectedNode()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("T"))):
 			return EventNone, nil, b.testAllNodes()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
 			return EventNone, nil, b.refreshNodesCmd()
@@ -301,9 +306,15 @@ func (b *NodeBrowser) Update(msg tea.Msg) (NodeBrowserEvent, *NodeBrowserSelecte
 		b.updateNodeResult(msg.Result)
 		return EventNone, nil, waitNodeResult(b.resultCh)
 
+	case nodeSingleTestResultMsg:
+		b.updateNodeResult(msg.Result)
+		return EventNone, nil, nil
+
 	case nodeTestCompleteMsg:
 		b.testing = false
 		b.resultCh = nil
+		b.pending = nil
+		b.updateTableRows()
 		return EventNone, nil, nil
 
 	case nodeRefreshedMsg:
@@ -351,6 +362,7 @@ func (b *NodeBrowser) View() string {
 			styles.HelpKey.Render("←/→") + styles.HelpText.Render(" switch sub  ") +
 			styles.HelpKey.Render("Enter") + styles.HelpText.Render(" select  ") +
 			styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
+			styles.HelpKey.Render("T") + styles.HelpText.Render(" test all  ") +
 			styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh  ") +
 			styles.HelpKey.Render("i") + styles.HelpText.Render(" detail  ") +
 			styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
@@ -358,6 +370,7 @@ func (b *NodeBrowser) View() string {
 		help = styles.HelpKey.Render("↑/↓") + styles.HelpText.Render(" navigate  ") +
 			styles.HelpKey.Render("←/→") + styles.HelpText.Render(" switch sub  ") +
 			styles.HelpKey.Render("t") + styles.HelpText.Render(" test  ") +
+			styles.HelpKey.Render("T") + styles.HelpText.Render(" test all  ") +
 			styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh  ") +
 			styles.HelpKey.Render("i") + styles.HelpText.Render(" detail  ") +
 			styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
@@ -389,6 +402,10 @@ func (b *NodeBrowser) Init() tea.Cmd {
 // -- internal types --
 
 type nodeTestResultMsg struct {
+	Result node.TestResult
+}
+
+type nodeSingleTestResultMsg struct {
 	Result node.TestResult
 }
 
@@ -585,7 +602,10 @@ func (b *NodeBrowser) updateTableRows() {
 		latency := "-"
 		status := ""
 
-		if result != nil {
+		if _, pending := b.pending[nodeTestKey(&b.nodes[i])]; pending {
+			latency = "..."
+			status = i18n.M().Nodes.Testing
+		} else if result != nil {
 			switch result.Status {
 			case node.StatusOnline:
 				latency = node.FormatLatency(result.Latency)
@@ -664,12 +684,39 @@ func (b *NodeBrowser) openDetailView() tea.Cmd {
 	return nil
 }
 
+// testSelectedNode tests only the node under the cursor.
+func (b *NodeBrowser) testSelectedNode() tea.Cmd {
+	selected := b.getSelectedNode()
+	if selected == nil || b.nodeMgr == nil {
+		return nil
+	}
+	nodeCopy := *selected
+	if b.pending == nil {
+		b.pending = make(map[string]struct{})
+	}
+	b.pending[nodeTestKey(&nodeCopy)] = struct{}{}
+	b.updateTableRows()
+
+	mgr := b.nodeMgr
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		result := mgr.TestNode(ctx, &nodeCopy)
+		return nodeSingleTestResultMsg{Result: result}
+	}
+}
+
 func (b *NodeBrowser) testAllNodes() tea.Cmd {
 	if b.testing {
 		return nil
 	}
 
 	b.testing = true
+	b.pending = make(map[string]struct{}, len(b.nodes))
+	for i := range b.nodes {
+		b.pending[nodeTestKey(&b.nodes[i])] = struct{}{}
+	}
+	b.updateTableRows()
 	ctx, cancel := context.WithCancel(context.Background())
 	b.cancelTest = cancel
 
@@ -686,6 +733,7 @@ func (b *NodeBrowser) testAllNodes() tea.Cmd {
 }
 
 func (b *NodeBrowser) updateNodeResult(result node.TestResult) {
+	delete(b.pending, nodeTestKey(result.Node))
 	for i := range b.nodes {
 		if b.nodes[i].Server == result.Node.Server && b.nodes[i].Port == result.Node.Port {
 			b.nodes[i].Latency = result.Latency
@@ -693,6 +741,13 @@ func (b *NodeBrowser) updateNodeResult(result node.TestResult) {
 		}
 	}
 	b.updateTableRows()
+}
+
+func nodeTestKey(n *subscription.Node) string {
+	if n == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", n.Server, n.Port)
 }
 
 func waitNodeResult(ch <-chan node.TestResult) tea.Cmd {

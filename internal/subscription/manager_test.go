@@ -438,3 +438,55 @@ func TestManager_UpdateAll_PartialFailure(t *testing.T) {
 		t.Fatalf("expected ok subscription to update to 2 nodes, got %d", len(gotOk.Nodes))
 	}
 }
+
+func TestManager_FetchUsesClashUserAgent(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	t.Setenv("C4C_SUBSCRIPTION_UA", "")
+
+	m := NewManager()
+	var gotUA, gotAccept string
+	m.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		gotUA = r.Header.Get("User-Agent")
+		gotAccept = r.Header.Get("Accept")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("ss://YWVzLTEyOC1nY206cGFzcw==@example.com:8388#N1\n")),
+			Header:     make(http.Header),
+			Request:    r,
+		}, nil
+	})
+
+	if _, err := m.Add("ua", "https://example.com/sub"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if gotUA != defaultSubscriptionUserAgent {
+		t.Fatalf("User-Agent=%q, want %q", gotUA, defaultSubscriptionUserAgent)
+	}
+	if gotAccept != "*/*" {
+		t.Fatalf("Accept=%q, want */*", gotAccept)
+	}
+}
+
+func TestManager_FetchUserAgentOverride(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	t.Setenv("C4C_SUBSCRIPTION_UA", "clash-verge/v2.2.3")
+
+	m := NewManager()
+	var gotUA string
+	m.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		gotUA = r.Header.Get("User-Agent")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("ss://YWVzLTEyOC1nY206cGFzcw==@example.com:8388#N1\n")),
+			Header:     make(http.Header),
+			Request:    r,
+		}, nil
+	})
+
+	if _, err := m.Add("ua", "https://example.com/sub"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if gotUA != "clash-verge/v2.2.3" {
+		t.Fatalf("User-Agent=%q, want override", gotUA)
+	}
+}

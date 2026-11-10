@@ -7,7 +7,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"rocket4cli/internal/config"
+	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/node"
+	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 )
 
@@ -314,5 +316,82 @@ func TestSlotsTab_SlotTrafficSetClear(t *testing.T) {
 	tab.ClearSlotTraffic(0)
 	if tab.slotTraffic[0] != nil {
 		t.Fatalf("expected traffic info to be cleared")
+	}
+}
+
+func TestSlotsTab_RegionLatencyShowsTesting(t *testing.T) {
+	tab := &SlotsTab{cfg: config.DefaultConfig()}
+
+	tab.slotTesting[0] = true
+	got := tab.slotRegionLatencyInfo(0)
+	if !strings.Contains(got, i18n.M().Nodes.Testing) {
+		t.Fatalf("expected testing indicator, got %q", got)
+	}
+
+	tab.slotTesting[0] = false
+	tab.slotRegions[0] = "Tokyo"
+	tab.slotLatencies[0] = 123
+	got = tab.slotRegionLatencyInfo(0)
+	if !strings.Contains(got, "Tokyo") || !strings.Contains(got, "123") {
+		t.Fatalf("expected region+latency, got %q", got)
+	}
+}
+
+func TestSlotsTab_TestResultClearsTestingFlag(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	tab := &SlotsTab{cfg: config.DefaultConfig()}
+	tab.slotTesting[0] = true
+	tab, _ = tab.Update(SlotTestResultMsg{SlotID: 0, Latency: 42, Region: "Tokyo"})
+	if tab.slotTesting[0] {
+		t.Fatalf("expected testing flag to be cleared")
+	}
+	if tab.slotRegions[0] != "Tokyo" || tab.slotLatencies[0] != 42 {
+		t.Fatalf("unexpected result: region=%q latency=%d", tab.slotRegions[0], tab.slotLatencies[0])
+	}
+}
+
+func TestSlotsTab_TestsSelectedSlotOnly(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	tab := NewSlotsTab(config.DefaultConfig(), subscription.NewManager(), nil, nil)
+	tab.SetSize(120, 30)
+	tab.slotListIndex = 1
+
+	tab, cmd := tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd == nil {
+		t.Fatalf("expected a test command")
+	}
+	if !tab.slotTesting[1] {
+		t.Fatalf("expected selected slot 1 to be testing")
+	}
+	if tab.slotTesting[0] || tab.slotTesting[2] {
+		t.Fatalf("expected other slots not to be testing: %v", tab.slotTesting)
+	}
+}
+
+func TestSlotsTab_UpperTTestsAllSlots(t *testing.T) {
+	t.Setenv("CLASH4CLI_HOME", t.TempDir())
+	if err := config.EnsureAllDirs(); err != nil {
+		t.Fatalf("EnsureAllDirs: %v", err)
+	}
+
+	tab := NewSlotsTab(config.DefaultConfig(), subscription.NewManager(), nil, nil)
+	tab.SetSize(120, 30)
+
+	tab, cmd := tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	if cmd == nil {
+		t.Fatalf("expected a test command")
+	}
+	for i := 0; i < proxy.MaxSlots; i++ {
+		if !tab.slotTesting[i] {
+			t.Fatalf("expected slot %d to be testing: %v", i, tab.slotTesting)
+		}
 	}
 }

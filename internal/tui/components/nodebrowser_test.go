@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"rocket4cli/internal/config"
+	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/node"
 	"rocket4cli/internal/subscription"
 )
@@ -276,5 +277,53 @@ func TestNodeBrowser_DetailView(t *testing.T) {
 	view := b.View()
 	if view == "" {
 		t.Fatal("expected non-empty detail view")
+	}
+}
+
+func TestNodeBrowser_ShowsTestingImmediately(t *testing.T) {
+	b := newTestNodeBrowser()
+	b.SetSize(120, 24)
+	b.Open("sub1", nil, BrowseMode)
+
+	b.nodes = []subscription.Node{{
+		Name:   "NodeA",
+		Server: "example.com",
+		Port:   8388,
+	}}
+	b.pending = map[string]struct{}{nodeTestKey(&b.nodes[0]): {}}
+	b.updateTableRows()
+
+	row := b.table.SelectedRow()
+	if len(row) < 5 {
+		t.Fatalf("unexpected row: %#v", row)
+	}
+	if row[3] != "..." {
+		t.Fatalf("latency=%q, want \"...\"", row[3])
+	}
+	if row[4] != i18n.M().Nodes.Testing {
+		t.Fatalf("status=%q, want %q", row[4], i18n.M().Nodes.Testing)
+	}
+}
+
+func TestNodeBrowser_TKeyTestsOnlySelectedNode(t *testing.T) {
+	b := newTestNodeBrowser()
+	b.SetSize(120, 24)
+	b.Open("sub1", nil, BrowseMode)
+	b.nodes = []subscription.Node{
+		{Name: "NodeA", Server: "a.example.com", Port: 8388},
+		{Name: "NodeB", Server: "b.example.com", Port: 8389},
+	}
+	b.updateTableRows()
+	b.table.SetSelected(0)
+
+	_, _, cmd := b.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd == nil {
+		t.Fatalf("expected a test command")
+	}
+	if _, ok := b.pending[nodeTestKey(&b.nodes[0])]; !ok {
+		t.Fatalf("expected selected node to be pending")
+	}
+	if _, ok := b.pending[nodeTestKey(&b.nodes[1])]; ok {
+		t.Fatalf("expected non-selected node NOT to be pending")
 	}
 }

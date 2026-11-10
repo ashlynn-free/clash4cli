@@ -484,12 +484,32 @@ func (m *Manager) GetNodesForSubscription(id string) []Node {
 	return nodes
 }
 
-func (m *Manager) fetchAndParseWithClient(url string, client *http.Client) ([]Node, error) {
-	logger.Info("HTTP GET: %s", url)
+// defaultSubscriptionUserAgent identifies the client to subscription providers.
+// Many panels only return Clash YAML (and reject others with 403) unless the
+// User-Agent looks like a Clash client; Go's default "Go-http-client/1.1" is
+// commonly blocked. Override with C4C_SUBSCRIPTION_UA if a provider is picky.
+const defaultSubscriptionUserAgent = "ClashforWindows/0.20.39"
+
+func subscriptionUserAgent() string {
+	if ua := strings.TrimSpace(os.Getenv("C4C_SUBSCRIPTION_UA")); ua != "" {
+		return ua
+	}
+	return defaultSubscriptionUserAgent
+}
+
+func (m *Manager) fetchAndParseWithClient(rawURL string, client *http.Client) ([]Node, error) {
+	logger.Info("HTTP GET: %s", rawURL)
 	if client == nil {
 		client = m.httpClient
 	}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build subscription request: %w", err)
+	}
+	req.Header.Set("User-Agent", subscriptionUserAgent())
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Error("HTTP request failed: %v", err)
 		return nil, fmt.Errorf("failed to fetch subscription: %w", err)
@@ -497,6 +517,9 @@ func (m *Manager) fetchAndParseWithClient(url string, client *http.Client) ([]No
 	defer resp.Body.Close()
 
 	logger.Info("HTTP Status: %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("HTTP error: 403 (the provider rejected this client; set C4C_SUBSCRIPTION_UA to a Clash-compatible User-Agent if it persists)")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP error: %d", resp.StatusCode)
 	}

@@ -161,6 +161,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.slotMgr != nil {
 		s.slotMgr.StopAll()
 	}
+	if s.logHub != nil {
+		// Active SSE log streams would otherwise keep Shutdown blocked until
+		// the context deadline, making the daemon slow to exit (and causing
+		// --stop/--restart to escalate to SIGKILL).
+		s.logHub.closeAll()
+	}
 	if s.httpSrv != nil {
 		if err := s.httpSrv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			stopErr = err

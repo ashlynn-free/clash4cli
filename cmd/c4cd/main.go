@@ -31,6 +31,28 @@ func main() {
 		case "-h", "--help", "help":
 			printHelp()
 			return
+		case "--stop", "stop":
+			result, err := daemon.StopDaemon()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			if result.WasRunning {
+				fmt.Printf("c4cd stopped (pid %d)\n", result.PID)
+			} else {
+				fmt.Println("c4cd is not running")
+			}
+			return
+		case "--restart", "restart":
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			_, info, err := daemon.RestartDaemon(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("c4cd restarted (pid %d, port %d)\n", info.PID, info.Port)
+			return
 		}
 	}
 
@@ -60,7 +82,7 @@ func main() {
 	defer proxy.SetDetachSubprocesses(true)
 
 	slotMgr := proxy.NewSlotManager(cfg)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	server := daemon.NewServer(cfg, slotMgr)
@@ -69,6 +91,7 @@ func main() {
 		os.Exit(1)
 	}
 	<-ctx.Done()
+	logger.Info("c4cd received shutdown signal; stopping slots")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Stop(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
@@ -82,9 +105,14 @@ func printHelp() {
 
 Usage:
   c4cd                Start local runtime daemon
+  c4cd --stop         Stop the running daemon (SIGTERM, then SIGKILL after 1s)
+  c4cd --restart      Restart the daemon in the background
   c4cd -v             Show version
   c4cd -h             Show this help
 
 The daemon exposes a localhost-only control API and owns runtime slot state.
+c4cd --stop verifies the daemon identity before terminating it, stops all
+slots, and removes stale authority files. SIGINT/SIGTERM/SIGHUP trigger the
+same graceful shutdown path.
 `)
 }

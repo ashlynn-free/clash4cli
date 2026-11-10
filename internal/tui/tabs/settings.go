@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"rocket4cli/internal/config"
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/netctl"
@@ -75,6 +77,20 @@ type settingsFlashTickMsg struct {
 	id int
 }
 
+type settingsSubPage int
+
+const (
+	settingsSubPageNone settingsSubPage = iota
+	settingsSubPageSystemInfo
+	settingsSubPageSlotList
+	settingsSubPageSlotDetail
+	settingsSubPageUpstreamList
+	settingsSubPageUpstreamDetail
+	settingsSubPageTUN
+	settingsSubPageSystemProxy
+	settingsSubPageLogs
+)
+
 // FieldType represents the type of setting field
 type FieldType int
 
@@ -87,45 +103,40 @@ const (
 
 // SettingsTab represents the settings tab
 type SettingsTab struct {
-	cfg              *config.Config
-	slotMgr          proxy.SlotService
-	appVersion       string
-	width            int
-	height           int
-	focusedField     int
-	fields           []settingField
-	armedReplace     bool
-	pendingSave      bool
-	message          string
-	messageType      string
-	messageShow      bool
-	flashID          int
-	flashTicks       int
-	scrollOffset     int
+	cfg          *config.Config
+	slotMgr      proxy.SlotService
+	appVersion   string
+	logsTab      *LogsTab
+	width        int
+	height       int
+	focusedField int
+	fields       []settingField
+	armedReplace bool
+	pendingSave  bool
+	message      string
+	messageType  string
+	messageShow  bool
+	flashID      int
+	flashTicks   int
+	scrollOffset int
+
 	slotUpstreamSlot int
 	slotListIndex    int
 	slotFields       []settingField
 	slotFocusedField int
 	slotScrollOffset int
-	// System Info secondary page
-	showSystemInfo bool
-	systemInfo     *SystemInfoData
-	showSlotList   bool
-	showSlotDetail bool
+	activeSubPage    settingsSubPage
+	systemInfo       *SystemInfoData
 	// Upstream proxy registry views
-	showUpstreamList     bool
-	showUpstreamDetail   bool
 	upstreamListIndex    int
 	upstreamDetailID     string // "" means creating new
 	upstreamFields       []settingField
 	upstreamFocusedField int
 	upstreamScrollOffset int
 	// TUN / System Proxy settings secondary pages
-	showTunSettings         bool
 	tunFields               []settingField
 	tunFocusedField         int
 	tunScrollOffset         int
-	showSystemProxySettings bool
 	systemProxyFields       []settingField
 	systemProxyFocusedField int
 	systemProxyScrollOffset int
@@ -140,6 +151,7 @@ type settingField struct {
 	disabled    bool
 	numericOnly bool
 	manualApply bool
+	inputSaved  string
 	// For input type
 	input textinput.Model
 	// For select type
@@ -257,7 +269,17 @@ func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version strin
 		}
 	}
 
+	// Advanced network features: TUN is available on Linux and macOS; Docker hijack remains Linux-only.
+	linuxSection := i18n.M().Settings.LinuxFeatures
+	if linuxSection == "" {
+		linuxSection = "Advanced Network Features"
+	}
+
 	fields := []settingField{
+		{
+			label:     "Proxy",
+			fieldType: FieldTypeHeader,
+		},
 		{
 			label:       i18n.M().Settings.MixedPortLabel,
 			helpText:    i18n.M().Settings.MixedPortHelp,
@@ -285,90 +307,93 @@ func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version strin
 			options:     updateViaProxyOptions,
 			selectedIdx: updateViaProxyIdx,
 		},
+		{
+			label:     "Upstream Proxies",
+			fieldType: FieldTypeHeader,
+		},
+		{
+			label:     "Edit Upstream Proxies >",
+			helpText:  "Manage reusable upstream proxy definitions.",
+			fieldType: FieldTypeButton,
+			key:       "edit_upstream_proxies",
+		},
 	}
 
-	// Advanced network features: TUN is available on Linux and macOS; Docker hijack remains Linux-only.
-	linuxSection := i18n.M().Settings.LinuxFeatures
-	if linuxSection == "" {
-		linuxSection = "Advanced Network Features"
+	hasSystemProxy := runtime.GOOS == "darwin"
+	hasTUN := (runtime.GOOS == "linux" || runtime.GOOS == "darwin") && os.Geteuid() == 0
+	hasDocker := runtime.GOOS == "linux"
+
+	if hasSystemProxy || hasTUN || hasDocker {
+		fields = append(fields, settingField{
+			label:     linuxSection,
+			fieldType: FieldTypeHeader,
+		})
 	}
-	fields = append(fields, settingField{
-		label:     "Upstream Proxies",
-		fieldType: FieldTypeHeader,
-	})
 
-	fields = append(fields, settingField{
-		label:     "Edit Upstream Proxies >",
-		helpText:  "Manage reusable upstream proxy definitions.",
-		fieldType: FieldTypeButton,
-		key:       "edit_upstream_proxies",
-	})
-
-	fields = append(fields, settingField{
-		label:     linuxSection,
-		fieldType: FieldTypeHeader,
-	})
-
-	tunDisabled := (runtime.GOOS != "linux" && runtime.GOOS != "darwin") || os.Geteuid() != 0
-	dockerDisabled := runtime.GOOS != "linux"
-
-	fields = append(fields, settingField{
-		label:     "System Proxy",
-		fieldType: FieldTypeSelect,
-		key:       "system_proxy_enabled",
-		options:   tunOptions,
-		selectedIdx: func() int {
-			if cfg.Proxy.SystemProxy.Enabled {
-				return 0
-			}
-			return 1
-		}(),
-		disabled: runtime.GOOS != "darwin",
-	})
-
-	fields = append(fields, settingField{
-		label:     "System Proxy Settings >",
-		helpText:  "macOS only. Applies to all network services.",
-		fieldType: FieldTypeButton,
-		key:       "system_proxy_settings",
-		disabled:  runtime.GOOS != "darwin",
-	})
-
-	tunLabel := i18n.M().Settings.Tun
-	if tunLabel == "" {
-		tunLabel = "TUN mode"
+	if hasSystemProxy {
+		fields = append(fields,
+			settingField{
+				label:     "System Proxy",
+				fieldType: FieldTypeSelect,
+				key:       "system_proxy_enabled",
+				options:   tunOptions,
+				selectedIdx: func() int {
+					if cfg.Proxy.SystemProxy.Enabled {
+						return 0
+					}
+					return 1
+				}(),
+			},
+			settingField{
+				label:     "System Proxy Settings >",
+				helpText:  "macOS only. Applies to all network services.",
+				fieldType: FieldTypeButton,
+				key:       "system_proxy_settings",
+			},
+		)
 	}
-	fields = append(fields, settingField{
-		label:       tunLabel,
-		fieldType:   FieldTypeSelect,
-		key:         "tun_enabled",
-		options:     tunOptions,
-		selectedIdx: tunIdx,
-		disabled:    tunDisabled,
-	})
 
-	fields = append(fields, settingField{
-		label:     "TUN Settings >",
-		helpText:  "Main slot only. Advanced TUN configuration.",
-		fieldType: FieldTypeButton,
-		key:       "tun_settings",
-		disabled:  tunDisabled,
-	})
-
-	dockerLabel := i18n.M().Settings.DockerTCP
-	if dockerLabel == "" {
-		dockerLabel = "Docker hijack (TCP, Linux)"
+	if hasTUN {
+		tunLabel := i18n.M().Settings.Tun
+		if tunLabel == "" {
+			tunLabel = "TUN mode"
+		}
+		fields = append(fields,
+			settingField{
+				label:       tunLabel,
+				fieldType:   FieldTypeSelect,
+				key:         "tun_enabled",
+				options:     tunOptions,
+				selectedIdx: tunIdx,
+			},
+			settingField{
+				label:     "TUN Settings >",
+				helpText:  "Main slot only. Advanced TUN configuration.",
+				fieldType: FieldTypeButton,
+				key:       "tun_settings",
+			},
+		)
 	}
-	fields = append(fields, settingField{
-		label:       dockerLabel,
-		fieldType:   FieldTypeSelect,
-		key:         "docker_redirect_tcp",
-		options:     dockerTCPOptions,
-		selectedIdx: dockerTCPIdx,
-		disabled:    dockerDisabled,
-	})
+
+	if hasDocker {
+		dockerLabel := i18n.M().Settings.DockerTCP
+		if dockerLabel == "" {
+			dockerLabel = "Docker hijack (TCP, Linux)"
+		}
+		fields = append(fields, settingField{
+			label:       dockerLabel,
+			fieldType:   FieldTypeSelect,
+			key:         "docker_redirect_tcp",
+			options:     dockerTCPOptions,
+			selectedIdx: dockerTCPIdx,
+		})
+	}
 
 	fields = append(fields,
+		settingField{
+			label:     "Display",
+			fieldType: FieldTypeHeader,
+		},
 		settingField{
 			label:       i18n.M().Settings.Language,
 			fieldType:   FieldTypeSelect,
@@ -398,20 +423,40 @@ func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version strin
 			numericOnly: true,
 		},
 		settingField{
+			label:     "System",
+			fieldType: FieldTypeHeader,
+		},
+		settingField{
 			label:     "System Info >",
 			fieldType: FieldTypeButton,
 			key:       "system_info",
 		},
+		settingField{
+			label:     "View Logs >",
+			helpText:  "Open the runtime log viewer.",
+			fieldType: FieldTypeButton,
+			key:       "show_logs",
+		},
 	)
 
-	// Focus first field
-	fields[0].input.Focus()
+	markInputBaselines(fields)
+
+	initialFocus := 0
+	for i := range fields {
+		if fields[i].fieldType != FieldTypeHeader && !fields[i].disabled {
+			initialFocus = i
+			break
+		}
+	}
+	fields[initialFocus].input.Focus()
 
 	tab := &SettingsTab{
 		cfg:          cfg,
 		slotMgr:      slotMgr,
 		appVersion:   version,
+		logsTab:      NewLogsTab(),
 		fields:       fields,
+		focusedField: initialFocus,
 		armedReplace: true,
 	}
 	tab.slotFields = tab.newSlotSettingsFields()
@@ -421,7 +466,50 @@ func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version strin
 	tab.loadTunDraft()
 	tab.systemProxyFields = tab.newSystemProxySettingsFields()
 	tab.loadSystemProxyDraft()
+
 	return tab
+}
+
+func (t *SettingsTab) SetLogsTab(logsTab *LogsTab) {
+	if logsTab == nil {
+		return
+	}
+	t.logsTab = logsTab
+}
+
+// HasFocusedInput reports whether the active settings view is editing text.
+// The parent TUI uses this to avoid treating numeric input as a tab shortcut.
+func (t *SettingsTab) HasFocusedInput() bool {
+	switch t.activeSubPage {
+	case settingsSubPageUpstreamDetail:
+		return t.focusedUpstreamInputField() != nil
+	case settingsSubPageSlotDetail:
+		return t.focusedSlotInputField() != nil
+	case settingsSubPageTUN:
+		return t.focusedTunInputField() != nil
+	case settingsSubPageSystemProxy:
+		return t.focusedSystemProxyInputField() != nil
+	case settingsSubPageSystemInfo, settingsSubPageSlotList, settingsSubPageUpstreamList, settingsSubPageLogs:
+		return false
+	default:
+		return t.focusedInputField() != nil
+	}
+}
+
+func markInputBaselines(fields []settingField) {
+	for i := range fields {
+		if fields[i].fieldType == FieldTypeInput {
+			fields[i].inputSaved = fields[i].input.Value()
+		}
+	}
+}
+
+func (t *SettingsTab) markTopLevelInputBaselines() {
+	for i := range t.fields {
+		if t.fields[i].fieldType == FieldTypeInput {
+			t.fields[i].inputSaved = t.fields[i].input.Value()
+		}
+	}
 }
 
 func (t *SettingsTab) newSlotSettingsFields() []settingField {
@@ -468,10 +556,7 @@ func (t *SettingsTab) buildUpstreamSelectOptions() []selectOption {
 }
 
 func (t *SettingsTab) newTunSettingsFields() []settingField {
-	tunDefaultStack := "system"
-	if runtime.GOOS == "darwin" {
-		tunDefaultStack = "mixed"
-	}
+	tunDefaultStack := defaultTunStack()
 	tunStackOptions := []selectOption{{label: "mixed", value: "mixed"}, {label: "gvisor", value: "gvisor"}, {label: "system", value: "system"}}
 	tunStackIdx := 0
 	for i, opt := range tunStackOptions {
@@ -508,7 +593,6 @@ func (t *SettingsTab) newTunSettingsFields() []settingField {
 	}
 	onOff := []selectOption{{label: i18n.M().Settings.On, value: "true"}, {label: i18n.M().Settings.Off, value: "false"}}
 	return []settingField{
-		{label: "Tun Mode", fieldType: FieldTypeHeader},
 		{label: "Tun Stack", helpText: fmt.Sprintf("Main slot only. Default: %s", tunDefaultStack), fieldType: FieldTypeSelect, key: "tun_stack", options: tunStackOptions, selectedIdx: tunStackIdx},
 		{label: "Device Name", helpText: "macOS: leave empty and let the system assign utun automatically.", fieldType: FieldTypeInput, key: "tun_device", input: tunDeviceInput},
 		{label: "Auto Route", fieldType: FieldTypeSelect, key: "tun_auto_route", options: onOff, selectedIdx: autoRouteIdx},
@@ -520,8 +604,15 @@ func (t *SettingsTab) newTunSettingsFields() []settingField {
 	}
 }
 
+func defaultTunStack() string {
+	if runtime.GOOS == "darwin" {
+		return "mixed"
+	}
+	return "system"
+}
+
 func (t *SettingsTab) loadTunDraft() {
-	t.tunFocusedField = 1
+	t.tunFocusedField = 0
 	t.tunScrollOffset = 0
 	for i := range t.tunFields {
 		if t.tunFields[i].fieldType == FieldTypeInput {
@@ -561,7 +652,6 @@ func (t *SettingsTab) newSystemProxySettingsFields() []settingField {
 		validateIdx = 0
 	}
 	return []settingField{
-		{label: "System Proxy Setting", fieldType: FieldTypeHeader},
 		{label: "Proxy Host", fieldType: FieldTypeInput, key: "system_proxy_host", input: hostInput},
 		{label: "Use PAC Mode", fieldType: FieldTypeSelect, key: "system_proxy_pac_mode", options: onOff, selectedIdx: pacIdx},
 		{label: "Proxy Guard", fieldType: FieldTypeSelect, key: "system_proxy_guard", options: onOff, selectedIdx: guardIdx},
@@ -574,7 +664,7 @@ func (t *SettingsTab) newSystemProxySettingsFields() []settingField {
 }
 
 func (t *SettingsTab) loadSystemProxyDraft() {
-	t.systemProxyFocusedField = 1
+	t.systemProxyFocusedField = 0
 	t.systemProxyScrollOffset = 0
 	for i := range t.systemProxyFields {
 		if t.systemProxyFields[i].fieldType == FieldTypeInput {
@@ -605,10 +695,6 @@ func newUpstreamDetailFields() []settingField {
 	passwordInput.CharLimit = 255
 
 	return []settingField{
-		{
-			label:     "Upstream Proxy Details",
-			fieldType: FieldTypeHeader,
-		},
 		{
 			label:       "Label",
 			helpText:    "A display name for this upstream proxy.",
@@ -678,6 +764,37 @@ func (t *SettingsTab) focusedInputField() *settingField {
 	return &t.fields[t.focusedField]
 }
 
+func (t *SettingsTab) blurFocusedFieldForMove() {
+	if t.focusedField < 0 || t.focusedField >= len(t.fields) {
+		return
+	}
+	if t.fields[t.focusedField].fieldType != FieldTypeInput {
+		return
+	}
+	t.fields[t.focusedField].input.Blur()
+	if !t.fields[t.focusedField].manualApply && t.fields[t.focusedField].input.Value() != t.fields[t.focusedField].inputSaved {
+		t.pendingSave = true
+	}
+}
+
+func (t *SettingsTab) focusField(index int) {
+	t.focusedField = index
+	if t.focusedField >= 0 && t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
+		t.fields[t.focusedField].input.Focus()
+		t.armedReplace = true
+	} else {
+		t.armedReplace = false
+	}
+}
+
+func (t *SettingsTab) setFocusedField(index int) {
+	if index == t.focusedField {
+		return
+	}
+	t.blurFocusedFieldForMove()
+	t.focusField(index)
+}
+
 func (t *SettingsTab) focusedSlotInputField() *settingField {
 	if t.slotFocusedField < 0 || t.slotFocusedField >= len(t.slotFields) {
 		return nil
@@ -718,12 +835,12 @@ func (t *SettingsTab) updateInputField(field *settingField, msg tea.KeyMsg) tea.
 
 // Update handles messages
 func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
-	// System Info secondary page intercepts all keys
-	if t.showSystemInfo {
+	// System Info secondary page intercepts all keys.
+	if t.activeSubPage == settingsSubPageSystemInfo {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			if key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))) {
-				t.showSystemInfo = false
+				t.activeSubPage = settingsSubPageNone
 				t.systemInfo = nil
 			}
 			return t, nil
@@ -734,32 +851,50 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		return t, nil
 	}
 
-	if t.showUpstreamDetail {
+	// Logs secondary page forwards navigation keys to the embedded log viewer.
+	if t.activeSubPage == settingsSubPageLogs {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok &&
+			key.Matches(keyMsg, key.NewBinding(key.WithKeys("esc", "backspace"))) {
+			t.activeSubPage = settingsSubPageNone
+			return t, nil
+		}
+		if t.logsTab != nil {
+			var cmd tea.Cmd
+			t.logsTab, cmd = t.logsTab.Update(msg)
+			return t, cmd
+		}
+		return t, nil
+	}
+
+	switch t.activeSubPage {
+	case settingsSubPageUpstreamDetail:
 		return t.updateUpstreamDetail(msg)
-	}
-
-	if t.showUpstreamList {
+	case settingsSubPageUpstreamList:
 		return t.updateUpstreamList(msg)
-	}
-
-	if t.showSlotDetail {
+	case settingsSubPageSlotDetail:
 		return t.updateSlotDetail(msg)
-	}
-
-	if t.showSlotList {
+	case settingsSubPageSlotList:
 		return t.updateSlotList(msg)
-	}
-
-	if t.showTunSettings {
+	case settingsSubPageTUN:
 		return t.updateTunSettings(msg)
-	}
-
-	if t.showSystemProxySettings {
+	case settingsSubPageSystemProxy:
 		return t.updateSystemProxySettings(msg)
 	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if t.focusedField < 0 || t.focusedField > len(t.fields) {
+			t.focusedField = 0
+		}
+
+		// Uppercase L opens the log viewer. Lowercase l remains the vi-style
+		// "move selection right" key for select fields. Top-level text inputs
+		// are numeric-only, so this cannot steal a character from an edit.
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 'L' {
+			t.activeSubPage = settingsSubPageLogs
+			return t, nil
+		}
+
 		if field := t.focusedInputField(); field != nil {
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
@@ -812,33 +947,35 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 					return t, t.saveSettings()
 				}
 				if field.fieldType == FieldTypeButton && field.key == "system_info" {
-					t.showSystemInfo = true
+					t.activeSubPage = settingsSubPageSystemInfo
 					t.systemInfo = nil
 					return t, t.fetchSystemInfo()
 				}
 				if field.fieldType == FieldTypeButton && field.key == "edit_upstream_proxies" {
-					t.showUpstreamList = true
-					t.showUpstreamDetail = false
+					t.activeSubPage = settingsSubPageUpstreamList
 					return t, nil
 				}
 				if field.fieldType == FieldTypeButton && field.key == "edit_slots" {
 					// Refresh slot fields in case upstream proxies were added/removed.
 					t.slotFields = t.newSlotSettingsFields()
 					t.loadSlotUpstreamDraft(t.slotListIndex)
-					t.showSlotList = true
-					t.showSlotDetail = false
+					t.activeSubPage = settingsSubPageSlotList
 					return t, nil
 				}
 				if field.fieldType == FieldTypeButton && field.key == "tun_settings" {
 					t.tunFields = t.newTunSettingsFields()
 					t.loadTunDraft()
-					t.showTunSettings = true
+					t.activeSubPage = settingsSubPageTUN
 					return t, nil
 				}
 				if field.fieldType == FieldTypeButton && field.key == "system_proxy_settings" {
 					t.systemProxyFields = t.newSystemProxySettingsFields()
 					t.loadSystemProxyDraft()
-					t.showSystemProxySettings = true
+					t.activeSubPage = settingsSubPageSystemProxy
+					return t, nil
+				}
+				if field.fieldType == FieldTypeButton && field.key == "show_logs" {
+					t.activeSubPage = settingsSubPageLogs
 					return t, nil
 				}
 			}
@@ -886,19 +1023,23 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		t.messageShow = true
 		return t, t.startFlash(3 * time.Second)
 
-	case tunChangedSaveMsg:
-			t.message = "TUN setting changed — restarting all slots..."
-			if msg.notice != "" {
-				t.message = msg.notice + " TUN setting changed — restarting all slots..."
-			}
-			t.messageType = "success"
-			t.messageShow = true
-			return t, tea.Batch(
-				t.startFlash(3*time.Second),
-				func() tea.Msg { return RestartAllSlotsMsg{} },
-			)
+	case systemInfoFetchedMsg:
+		t.systemInfo = &msg.info
+		return t, nil
 
-		case portChangedSaveMsg:
+	case tunChangedSaveMsg:
+		t.message = "TUN setting changed — restarting all slots..."
+		if msg.notice != "" {
+			t.message = msg.notice + " TUN setting changed — restarting all slots..."
+		}
+		t.messageType = "success"
+		t.messageShow = true
+		return t, tea.Batch(
+			t.startFlash(3*time.Second),
+			func() tea.Msg { return RestartAllSlotsMsg{} },
+		)
+
+	case portChangedSaveMsg:
 		t.message = "Port changed — restarting all slots..."
 		if msg.notice != "" {
 			t.message = msg.notice + " Port changed — restarting all slots..."
@@ -953,52 +1094,49 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 	return t, nil
 }
 
-func (t *SettingsTab) focusNext() {
-	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
-		t.fields[t.focusedField].input.Blur()
-		if !t.fields[t.focusedField].manualApply {
-			t.pendingSave = true
+// focusableIndexes returns the focusable top-level fields plus the virtual
+// restart-core button that follows the last field.
+func (t *SettingsTab) focusableIndexes() []int {
+	indexes := make([]int, 0, len(t.fields)+1)
+	for i := range t.fields {
+		if t.isFieldFocusable(i) {
+			indexes = append(indexes, i)
 		}
 	}
-	for {
-		t.focusedField++
-		if t.focusedField > len(t.fields) {
-			t.focusedField = 0
-		}
-		if t.focusedField >= len(t.fields) || t.isFieldFocusable(t.focusedField) {
+	indexes = append(indexes, len(t.fields))
+	return indexes
+}
+
+func (t *SettingsTab) focusNext() {
+	indexes := t.focusableIndexes()
+	if len(indexes) == 0 {
+		return
+	}
+	pos := -1
+	for i, idx := range indexes {
+		if idx == t.focusedField {
+			pos = i
 			break
 		}
 	}
-	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
-		t.fields[t.focusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	next := indexes[(pos+1)%len(indexes)]
+	t.setFocusedField(next)
 }
 
 func (t *SettingsTab) focusPrev() {
-	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
-		t.fields[t.focusedField].input.Blur()
-		if !t.fields[t.focusedField].manualApply {
-			t.pendingSave = true
-		}
+	indexes := t.focusableIndexes()
+	if len(indexes) == 0 {
+		return
 	}
-	for {
-		t.focusedField--
-		if t.focusedField < 0 {
-			t.focusedField = len(t.fields)
-		}
-		if t.focusedField >= len(t.fields) || t.isFieldFocusable(t.focusedField) {
+	pos := 0
+	for i, idx := range indexes {
+		if idx == t.focusedField {
+			pos = i
 			break
 		}
 	}
-	if t.focusedField < len(t.fields) && t.fields[t.focusedField].fieldType == FieldTypeInput {
-		t.fields[t.focusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	prev := indexes[(pos-1+len(indexes))%len(indexes)]
+	t.setFocusedField(prev)
 }
 
 func (t *SettingsTab) isFieldFocusable(index int) bool {
@@ -1026,6 +1164,7 @@ func (t *SettingsTab) applyTunFieldState() {
 		}
 	}
 }
+
 func filterDigits(runes []rune) []rune {
 	out := make([]rune, 0, len(runes))
 	for _, r := range runes {
@@ -1141,121 +1280,73 @@ func (t *SettingsTab) focusedSystemProxyInputField() *settingField {
 }
 
 func (t *SettingsTab) tunFocusNext() {
-	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
-		t.tunFields[t.tunFocusedField].input.Blur()
-	}
-	for {
-		t.tunFocusedField++
-		if t.tunFocusedField >= len(t.tunFields) {
-			t.tunFocusedField = 0
-		}
-		if t.tunFocusedField >= len(t.tunFields) || (t.tunFields[t.tunFocusedField].fieldType != FieldTypeHeader && !t.tunFields[t.tunFocusedField].disabled) {
-			break
-		}
-	}
-	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
-		t.tunFields[t.tunFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	t.moveFieldFocus(t.tunFields, &t.tunFocusedField, 1)
 }
 
 func (t *SettingsTab) tunFocusPrev() {
-	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
-		t.tunFields[t.tunFocusedField].input.Blur()
-	}
-	for {
-		t.tunFocusedField--
-		if t.tunFocusedField < 0 {
-			t.tunFocusedField = len(t.tunFields) - 1
-		}
-		if t.tunFocusedField >= len(t.tunFields) || (t.tunFields[t.tunFocusedField].fieldType != FieldTypeHeader && !t.tunFields[t.tunFocusedField].disabled) {
-			break
-		}
-	}
-	if t.tunFocusedField < len(t.tunFields) && t.tunFields[t.tunFocusedField].fieldType == FieldTypeInput {
-		t.tunFields[t.tunFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	t.moveFieldFocus(t.tunFields, &t.tunFocusedField, -1)
 }
 
 func (t *SettingsTab) systemProxyFocusNext() {
-	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
-		t.systemProxyFields[t.systemProxyFocusedField].input.Blur()
-	}
-	for {
-		t.systemProxyFocusedField++
-		if t.systemProxyFocusedField >= len(t.systemProxyFields) {
-			t.systemProxyFocusedField = 0
-		}
-		if t.systemProxyFocusedField >= len(t.systemProxyFields) || (t.systemProxyFields[t.systemProxyFocusedField].fieldType != FieldTypeHeader && !t.systemProxyFields[t.systemProxyFocusedField].disabled) {
-			break
-		}
-	}
-	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
-		t.systemProxyFields[t.systemProxyFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	t.moveFieldFocus(t.systemProxyFields, &t.systemProxyFocusedField, 1)
 }
 
 func (t *SettingsTab) systemProxyFocusPrev() {
-	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
-		t.systemProxyFields[t.systemProxyFocusedField].input.Blur()
-	}
-	for {
-		t.systemProxyFocusedField--
-		if t.systemProxyFocusedField < 0 {
-			t.systemProxyFocusedField = len(t.systemProxyFields) - 1
-		}
-		if t.systemProxyFocusedField >= len(t.systemProxyFields) || (t.systemProxyFields[t.systemProxyFocusedField].fieldType != FieldTypeHeader && !t.systemProxyFields[t.systemProxyFocusedField].disabled) {
-			break
-		}
-	}
-	if t.systemProxyFocusedField < len(t.systemProxyFields) && t.systemProxyFields[t.systemProxyFocusedField].fieldType == FieldTypeInput {
-		t.systemProxyFields[t.systemProxyFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	t.moveFieldFocus(t.systemProxyFields, &t.systemProxyFocusedField, -1)
 }
 
 func (t *SettingsTab) saveTunSettings() tea.Cmd {
 	return func() tea.Msg {
+		next := t.cfg.Proxy
 		for _, field := range t.tunFields {
 			switch field.key {
 			case "tun_stack":
-				t.cfg.Proxy.TunStack = field.options[field.selectedIdx].value
+				next.TunStack = field.options[field.selectedIdx].value
 			case "tun_device":
-				t.cfg.Proxy.TunDevice = strings.TrimSpace(field.input.Value())
+				next.TunDevice = strings.TrimSpace(field.input.Value())
 			case "tun_auto_route":
-				t.cfg.Proxy.TunAutoRoute = field.options[field.selectedIdx].value == "true"
+				next.TunAutoRoute = field.options[field.selectedIdx].value == "true"
 			case "tun_strict_route":
-				t.cfg.Proxy.TunStrictRoute = field.options[field.selectedIdx].value == "true"
+				next.TunStrictRoute = field.options[field.selectedIdx].value == "true"
 			case "tun_auto_detect_interface":
-				t.cfg.Proxy.TunAutoDetectInterface = field.options[field.selectedIdx].value == "true"
+				next.TunAutoDetectInterface = field.options[field.selectedIdx].value == "true"
 			case "tun_dns_hijack":
-				t.cfg.Proxy.TunDNSHijack = parseCSVList(field.input.Value())
+				next.TunDNSHijack = parseCSVList(field.input.Value())
 			case "tun_mtu":
 				v := strings.TrimSpace(field.input.Value())
 				if v == "" {
-					t.cfg.Proxy.TunMTU = 0
+					next.TunMTU = 0
 				} else {
 					n, err := strconv.Atoi(v)
 					if err != nil || n <= 0 || n >= 65536 {
 						return SettingsErrorMsg{Error: fmt.Errorf("invalid tun_mtu value: %q", field.input.Value())}
 					}
-					t.cfg.Proxy.TunMTU = n
+					next.TunMTU = n
 				}
 			case "tun_route_exclude_address":
-				t.cfg.Proxy.TunRouteExcludeAddress = parseCSVList(field.input.Value())
+				next.TunRouteExcludeAddress = parseCSVList(field.input.Value())
 			}
 		}
-		if err := t.cfg.Save(); err != nil {
+
+		current := t.cfg.Proxy
+		if current.TunStack == "" && next.TunStack == defaultTunStack() {
+			next.TunStack = ""
+		}
+		changed := current.TunStack != next.TunStack ||
+			current.TunDevice != next.TunDevice ||
+			current.TunAutoRoute != next.TunAutoRoute ||
+			current.TunStrictRoute != next.TunStrictRoute ||
+			current.TunAutoDetectInterface != next.TunAutoDetectInterface ||
+			!slices.Equal(current.TunDNSHijack, next.TunDNSHijack) ||
+			current.TunMTU != next.TunMTU ||
+			!slices.Equal(current.TunRouteExcludeAddress, next.TunRouteExcludeAddress)
+		if !changed {
+			return nil
+		}
+
+		t.cfg.Proxy = next
+		if err := persistConfig(t.cfg, t.slotMgr); err != nil {
+			t.cfg.Proxy = current
 			return SettingsErrorMsg{Error: err}
 		}
 		return tunChangedSaveMsg{notice: "Saved TUN settings"}
@@ -1289,7 +1380,7 @@ func (t *SettingsTab) saveSystemProxySettings() tea.Cmd {
 				t.cfg.Proxy.SystemProxy.Bypass = parseCSVList(field.input.Value())
 			}
 		}
-		if err := t.cfg.Save(); err != nil {
+		if err := persistConfig(t.cfg, t.slotMgr); err != nil {
 			return SettingsErrorMsg{Error: err}
 		}
 		status, err := netctl.ReadSystemProxyStatus()
@@ -1306,7 +1397,7 @@ func (t *SettingsTab) updateTunSettings(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		if field := t.focusedTunInputField(); field != nil {
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-				t.showTunSettings = false
+				t.activeSubPage = settingsSubPageNone
 				return t, nil
 			case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 				cmd := t.saveTunSettings()
@@ -1322,7 +1413,7 @@ func (t *SettingsTab) updateTunSettings(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		}
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.showTunSettings = false
+			t.activeSubPage = settingsSubPageNone
 			return t, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 			cmd := t.saveTunSettings()
@@ -1352,13 +1443,24 @@ func (t *SettingsTab) updateTunSettings(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 			}
 		}
 	case tunChangedSaveMsg:
-		t.showTunSettings = false
+		t.message = msg.notice + " — restarting all slots..."
+		t.messageType = "success"
+		t.messageShow = true
 		return t, tea.Batch(
 			t.startFlash(3*time.Second),
 			func() tea.Msg { return RestartAllSlotsMsg{} },
 		)
-	case SettingsSavedMsg, SettingsErrorMsg, settingsFlashTickMsg:
-		return t, nil
+	case SettingsErrorMsg:
+		if msg.Error != nil {
+			t.message = msg.Error.Error()
+		} else {
+			t.message = "unknown error"
+		}
+		t.messageType = "error"
+		t.messageShow = true
+		return t, t.startFlash(3 * time.Second)
+	case settingsFlashTickMsg:
+		return t.updateSettingsFlash(msg)
 	}
 	return t, nil
 }
@@ -1369,7 +1471,7 @@ func (t *SettingsTab) updateSystemProxySettings(msg tea.Msg) (*SettingsTab, tea.
 		if field := t.focusedSystemProxyInputField(); field != nil {
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-				t.showSystemProxySettings = false
+				t.activeSubPage = settingsSubPageNone
 				return t, nil
 			case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 				t.systemProxyFocusPrev()
@@ -1383,7 +1485,7 @@ func (t *SettingsTab) updateSystemProxySettings(msg tea.Msg) (*SettingsTab, tea.
 		}
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.showSystemProxySettings = false
+			t.activeSubPage = settingsSubPageNone
 			return t, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 			t.systemProxyFocusPrev()
@@ -1414,8 +1516,25 @@ func (t *SettingsTab) updateSystemProxySettings(msg tea.Msg) (*SettingsTab, tea.
 				return t, nil
 			}
 		}
-	case SettingsSavedMsg, SettingsErrorMsg, settingsFlashTickMsg:
-		return t, nil
+	case SettingsSavedMsg:
+		t.message = msg.Message
+		if t.message == "" {
+			t.message = i18n.M().Settings.Saved
+		}
+		t.messageType = "success"
+		t.messageShow = true
+		return t, t.startFlash(3 * time.Second)
+	case SettingsErrorMsg:
+		if msg.Error != nil {
+			t.message = msg.Error.Error()
+		} else {
+			t.message = "unknown error"
+		}
+		t.messageType = "error"
+		t.messageShow = true
+		return t, t.startFlash(3 * time.Second)
+	case settingsFlashTickMsg:
+		return t.updateSettingsFlash(msg)
 	}
 	return t, nil
 }
@@ -1479,11 +1598,7 @@ func renderSettingsSubpage(title string, fields []settingField, focused int, scr
 		}
 		switch field.fieldType {
 		case FieldTypeInput:
-			inputStyle := styles.InputField
-			if i == focused {
-				inputStyle = styles.InputFocused
-			}
-			appendBlock(inputStyle.Render(field.input.View()))
+			appendBlock("    " + field.input.View())
 			appendLine("")
 		case FieldTypeSelect:
 			appendBlock(renderSelectStatic(field, i == focused))
@@ -1519,22 +1634,7 @@ func renderSettingsSubpage(title string, fields []settingField, focused int, scr
 	if visibleHeight < 1 {
 		visibleHeight = 1
 	}
-	if focusedLine < *scrollOffset {
-		*scrollOffset = focusedLine
-	}
-	if focusedLine >= *scrollOffset+visibleHeight {
-		*scrollOffset = focusedLine - visibleHeight + 1
-	}
-	if *scrollOffset < 0 {
-		*scrollOffset = 0
-	}
-	maxOffset := len(lines) - visibleHeight
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if *scrollOffset > maxOffset {
-		*scrollOffset = maxOffset
-	}
+	*scrollOffset = adjustScrollOffset(focusedLine, *scrollOffset, visibleHeight, len(lines))
 	start := *scrollOffset
 	end := *scrollOffset + visibleHeight
 	if end > len(lines) {
@@ -1572,7 +1672,7 @@ func renderSelectStatic(field settingField, focused bool) string {
 }
 
 func (t *SettingsTab) viewTunSettings() string {
-	return renderSettingsSubpage("Tun Mode", t.tunFields, t.tunFocusedField, &t.tunScrollOffset, t.width, t.height, t.message, t.messageType, t.messageShow)
+	return renderSettingsSubpage("Tun Mode", t.tunFields, t.tunFocusedField, &t.tunScrollOffset, t.panelWidth(), t.height, t.message, t.messageType, t.messageShow)
 }
 
 func (t *SettingsTab) viewSystemProxySettings() string {
@@ -1584,7 +1684,7 @@ func (t *SettingsTab) viewSystemProxySettings() string {
 		}
 		title = fmt.Sprintf("System Proxy Setting (%s)", state)
 	}
-	return renderSettingsSubpage(title, t.systemProxyFields, t.systemProxyFocusedField, &t.systemProxyScrollOffset, t.width, t.height, t.message, t.messageType, t.messageShow)
+	return renderSettingsSubpage(title, t.systemProxyFields, t.systemProxyFocusedField, &t.systemProxyScrollOffset, t.panelWidth(), t.height, t.message, t.messageType, t.messageShow)
 }
 
 func (t *SettingsTab) saveSlotUpstream() tea.Cmd {
@@ -1600,7 +1700,7 @@ func (t *SettingsTab) saveSlotUpstream() tea.Cmd {
 		}
 
 		t.cfg.SetSlotUpstreamRef(slotID, upstreamID)
-		if err := t.cfg.Save(); err != nil {
+		if err := persistConfig(t.cfg, t.slotMgr); err != nil {
 			return SettingsErrorMsg{Error: err}
 		}
 
@@ -1628,8 +1728,7 @@ func (t *SettingsTab) updateSlotList(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.showSlotList = false
-			t.showSlotDetail = false
+			t.activeSubPage = settingsSubPageNone
 			return t, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 			t.slotListIndex--
@@ -1643,7 +1742,7 @@ func (t *SettingsTab) updateSlotList(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			t.loadSlotUpstreamDraft(t.slotListIndex)
-			t.showSlotDetail = true
+			t.activeSubPage = settingsSubPageSlotDetail
 			return t, nil
 		}
 	case settingsFlashTickMsg:
@@ -1670,7 +1769,7 @@ func (t *SettingsTab) updateSlotDetail(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		if field := t.focusedSlotInputField(); field != nil {
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-				t.showSlotDetail = false
+				t.activeSubPage = settingsSubPageSlotList
 				for i := range t.slotFields {
 					if t.slotFields[i].fieldType == FieldTypeInput {
 						t.slotFields[i].input.Blur()
@@ -1692,7 +1791,7 @@ func (t *SettingsTab) updateSlotDetail(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.showSlotDetail = false
+			t.activeSubPage = settingsSubPageSlotList
 			for i := range t.slotFields {
 				if t.slotFields[i].fieldType == FieldTypeInput {
 					t.slotFields[i].input.Blur()
@@ -1799,61 +1898,16 @@ func (t *SettingsTab) focusedUpstreamInputField() *settingField {
 }
 
 func (t *SettingsTab) upstreamFocusNext() {
-	if t.upstreamFocusedField < len(t.upstreamFields) && t.upstreamFields[t.upstreamFocusedField].fieldType == FieldTypeInput {
-		t.upstreamFields[t.upstreamFocusedField].input.Blur()
-	}
-	for {
-		t.upstreamFocusedField++
-		if t.upstreamFocusedField >= len(t.upstreamFields) {
-			t.upstreamFocusedField = 0
-		}
-		if t.isUpstreamFieldFocusable(t.upstreamFocusedField) {
-			break
-		}
-	}
-	if t.upstreamFocusedField < len(t.upstreamFields) && t.upstreamFields[t.upstreamFocusedField].fieldType == FieldTypeInput {
-		t.upstreamFields[t.upstreamFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	t.moveFieldFocus(t.upstreamFields, &t.upstreamFocusedField, 1)
 }
 
 func (t *SettingsTab) upstreamFocusPrev() {
-	if t.upstreamFocusedField < len(t.upstreamFields) && t.upstreamFields[t.upstreamFocusedField].fieldType == FieldTypeInput {
-		t.upstreamFields[t.upstreamFocusedField].input.Blur()
-	}
-	for {
-		t.upstreamFocusedField--
-		if t.upstreamFocusedField < 0 {
-			t.upstreamFocusedField = len(t.upstreamFields) - 1
-		}
-		if t.isUpstreamFieldFocusable(t.upstreamFocusedField) {
-			break
-		}
-	}
-	if t.upstreamFocusedField < len(t.upstreamFields) && t.upstreamFields[t.upstreamFocusedField].fieldType == FieldTypeInput {
-		t.upstreamFields[t.upstreamFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
-}
-
-func (t *SettingsTab) isUpstreamFieldFocusable(index int) bool {
-	if index < 0 || index >= len(t.upstreamFields) {
-		return false
-	}
-	f := t.upstreamFields[index]
-	if f.fieldType == FieldTypeHeader || f.disabled {
-		return false
-	}
-	return true
+	t.moveFieldFocus(t.upstreamFields, &t.upstreamFocusedField, -1)
 }
 
 func (t *SettingsTab) loadUpstreamDraft(id string) {
 	t.upstreamDetailID = id
-	t.upstreamFocusedField = 1
+	t.upstreamFocusedField = 0
 	t.upstreamScrollOffset = 0
 
 	var entry config.UpstreamProxyEntry
@@ -1967,7 +2021,7 @@ func (t *SettingsTab) saveUpstreamProxy() tea.Cmd {
 				return SettingsErrorMsg{Error: err}
 			}
 		}
-		if err := t.cfg.Save(); err != nil {
+		if err := persistConfig(t.cfg, t.slotMgr); err != nil {
 			return SettingsErrorMsg{Error: err}
 		}
 
@@ -1984,8 +2038,7 @@ func (t *SettingsTab) updateUpstreamList(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.showUpstreamList = false
-			t.showUpstreamDetail = false
+			t.activeSubPage = settingsSubPageNone
 			return t, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
 			t.upstreamListIndex--
@@ -2005,7 +2058,7 @@ func (t *SettingsTab) updateUpstreamList(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 				// Add new entry.
 				t.loadUpstreamDraft("")
 			}
-			t.showUpstreamDetail = true
+			t.activeSubPage = settingsSubPageUpstreamDetail
 			return t, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("d", "delete"))):
 			if t.upstreamListIndex < len(entries) {
@@ -2016,7 +2069,7 @@ func (t *SettingsTab) updateUpstreamList(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 					t.messageShow = true
 					return t, t.startFlash(3 * time.Second)
 				}
-				if err := t.cfg.Save(); err != nil {
+				if err := persistConfig(t.cfg, t.slotMgr); err != nil {
 					t.message = err.Error()
 					t.messageType = "error"
 					t.messageShow = true
@@ -2057,7 +2110,7 @@ func (t *SettingsTab) updateUpstreamDetail(msg tea.Msg) (*SettingsTab, tea.Cmd) 
 		if field := t.focusedUpstreamInputField(); field != nil {
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-				t.showUpstreamDetail = false
+				t.activeSubPage = settingsSubPageUpstreamList
 				for i := range t.upstreamFields {
 					if t.upstreamFields[i].fieldType == FieldTypeInput {
 						t.upstreamFields[i].input.Blur()
@@ -2079,7 +2132,7 @@ func (t *SettingsTab) updateUpstreamDetail(msg tea.Msg) (*SettingsTab, tea.Cmd) 
 
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
-			t.showUpstreamDetail = false
+			t.activeSubPage = settingsSubPageUpstreamList
 			for i := range t.upstreamFields {
 				if t.upstreamFields[i].fieldType == FieldTypeInput {
 					t.upstreamFields[i].input.Blur()
@@ -2195,10 +2248,53 @@ func (t *SettingsTab) viewUpstreamList() string {
 
 	help := styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" select  ") +
 		styles.HelpKey.Render("Enter") + styles.HelpText.Render(" edit  ") +
-		styles.HelpKey.Render("d") + styles.HelpText.Render(" delete  ") +
+		styles.HelpKey.Render("d/Delete") + styles.HelpText.Render(" delete  ") +
 		styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
 
-	return styles.ContentArea.Render(strings.Join(append(lines, "", help), "\n"))
+	if t.height <= 0 {
+		return styles.ContentArea.Render(strings.Join(append(lines, "", help), "\n"))
+	}
+
+	focusedLine := 3 + t.upstreamListIndex
+	needsScroll := len(lines) > t.height-1
+	showScrollIndicator := needsScroll && t.height > 2
+	reservedBottom := 1
+	if showScrollIndicator {
+		reservedBottom = 2
+	}
+	visibleHeight := t.height - reservedBottom
+	if visibleHeight < 1 {
+		visibleHeight = 1
+	}
+
+	offset := 0
+	if focusedLine >= visibleHeight {
+		offset = focusedLine - visibleHeight + 1
+	}
+	if maxOffset := len(lines) - visibleHeight; offset > maxOffset {
+		offset = maxOffset
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := offset + visibleHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	content := strings.Join(lines[offset:end], "\n")
+	if showScrollIndicator {
+		scrollText := fmt.Sprintf("[%d-%d/%d]", offset+1, end, len(lines))
+		scrollInfo := lipgloss.NewStyle().
+			Foreground(styles.MutedColor).
+			Width(t.panelWidth()).
+			Align(lipgloss.Right).
+			Render(scrollText)
+		content += "\n" + scrollInfo
+	}
+	content += "\n" + help
+
+	return styles.ContentArea.Render(content)
 }
 
 func (t *SettingsTab) viewUpstreamDetail() string {
@@ -2261,11 +2357,7 @@ func (t *SettingsTab) viewUpstreamDetail() string {
 
 		switch field.fieldType {
 		case FieldTypeInput:
-			inputStyle := styles.InputField
-			if i == t.upstreamFocusedField {
-				inputStyle = styles.InputFocused
-			}
-			appendBlock(inputStyle.Render(field.input.View()))
+			appendBlock("    " + field.input.View())
 			appendLine("")
 		case FieldTypeSelect:
 			appendBlock(t.renderSelect(field, i == t.upstreamFocusedField))
@@ -2302,23 +2394,7 @@ func (t *SettingsTab) viewUpstreamDetail() string {
 		visibleHeight = 1
 	}
 
-	if focusedLine < t.upstreamScrollOffset {
-		t.upstreamScrollOffset = focusedLine
-	}
-	if focusedLine >= t.upstreamScrollOffset+visibleHeight {
-		t.upstreamScrollOffset = focusedLine - visibleHeight + 1
-	}
-	if t.upstreamScrollOffset < 0 {
-		t.upstreamScrollOffset = 0
-	}
-	maxOffset := len(lines) - visibleHeight
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if t.upstreamScrollOffset > maxOffset {
-		t.upstreamScrollOffset = maxOffset
-	}
-
+	t.upstreamScrollOffset = adjustScrollOffset(focusedLine, t.upstreamScrollOffset, visibleHeight, len(lines))
 	start := t.upstreamScrollOffset
 	end := t.upstreamScrollOffset + visibleHeight
 	if end > len(lines) {
@@ -2330,7 +2406,7 @@ func (t *SettingsTab) viewUpstreamDetail() string {
 		scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
 		scrollInfo := lipgloss.NewStyle().
 			Foreground(styles.MutedColor).
-			Width(t.width).
+			Width(t.panelWidth()).
 			Align(lipgloss.Right).
 			Render(scrollText)
 		content += "\n" + scrollInfo
@@ -2341,56 +2417,11 @@ func (t *SettingsTab) viewUpstreamDetail() string {
 }
 
 func (t *SettingsTab) slotFocusNext() {
-	if t.slotFocusedField < len(t.slotFields) && t.slotFields[t.slotFocusedField].fieldType == FieldTypeInput {
-		t.slotFields[t.slotFocusedField].input.Blur()
-	}
-	for {
-		t.slotFocusedField++
-		if t.slotFocusedField >= len(t.slotFields) {
-			t.slotFocusedField = 0
-		}
-		if t.isSlotFieldFocusable(t.slotFocusedField) {
-			break
-		}
-	}
-	if t.slotFocusedField < len(t.slotFields) && t.slotFields[t.slotFocusedField].fieldType == FieldTypeInput {
-		t.slotFields[t.slotFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
+	t.moveFieldFocus(t.slotFields, &t.slotFocusedField, 1)
 }
 
 func (t *SettingsTab) slotFocusPrev() {
-	if t.slotFocusedField < len(t.slotFields) && t.slotFields[t.slotFocusedField].fieldType == FieldTypeInput {
-		t.slotFields[t.slotFocusedField].input.Blur()
-	}
-	for {
-		t.slotFocusedField--
-		if t.slotFocusedField < 0 {
-			t.slotFocusedField = len(t.slotFields) - 1
-		}
-		if t.isSlotFieldFocusable(t.slotFocusedField) {
-			break
-		}
-	}
-	if t.slotFocusedField < len(t.slotFields) && t.slotFields[t.slotFocusedField].fieldType == FieldTypeInput {
-		t.slotFields[t.slotFocusedField].input.Focus()
-		t.armedReplace = true
-	} else {
-		t.armedReplace = false
-	}
-}
-
-func (t *SettingsTab) isSlotFieldFocusable(index int) bool {
-	if index < 0 || index >= len(t.slotFields) {
-		return false
-	}
-	f := t.slotFields[index]
-	if f.fieldType == FieldTypeHeader || f.disabled {
-		return false
-	}
-	return true
+	t.moveFieldFocus(t.slotFields, &t.slotFocusedField, -1)
 }
 
 func (t *SettingsTab) startFlash(duration time.Duration) tea.Cmd {
@@ -2411,180 +2442,234 @@ func (t *SettingsTab) nextFlashTick() tea.Cmd {
 	})
 }
 
+func (t *SettingsTab) updateSettingsFlash(msg settingsFlashTickMsg) (*SettingsTab, tea.Cmd) {
+	if msg.id != t.flashID {
+		return t, nil
+	}
+	t.flashTicks--
+	if t.flashTicks <= 0 {
+		t.message = ""
+		t.messageType = ""
+		t.messageShow = false
+		return t, nil
+	}
+	t.messageShow = !t.messageShow
+	return t, t.nextFlashTick()
+}
+
 // View renders the tab
 func (t *SettingsTab) View() string {
-	if t.showSystemInfo {
-		return t.viewSystemInfo()
+	var view string
+	switch t.activeSubPage {
+	case settingsSubPageSystemInfo:
+		view = t.viewSystemInfo()
+	case settingsSubPageUpstreamDetail:
+		view = t.viewUpstreamDetail()
+	case settingsSubPageUpstreamList:
+		view = t.viewUpstreamList()
+	case settingsSubPageSlotDetail:
+		view = t.viewSlotDetail()
+	case settingsSubPageSlotList:
+		view = t.viewSlotList()
+	case settingsSubPageTUN:
+		view = t.viewTunSettings()
+	case settingsSubPageSystemProxy:
+		view = t.viewSystemProxySettings()
+	case settingsSubPageLogs:
+		view = t.viewLogs()
+	default:
+		view = t.viewMain()
 	}
-	if t.showUpstreamDetail {
-		return t.viewUpstreamDetail()
+	return truncateView(view, t.width)
+}
+
+// truncateView guarantees that no line wraps; a wrapped line would make the
+// settings tab taller than its allotted height and hide the tab/status bars.
+func truncateView(view string, width int) string {
+	if width <= 0 {
+		return view
 	}
-	if t.showUpstreamList {
-		return t.viewUpstreamList()
+	lines := strings.Split(view, "\n")
+	for i := range lines {
+		lines[i] = truncateToWidth(lines[i], width)
 	}
-	if t.showSlotDetail {
-		return t.viewSlotDetail()
+	return strings.Join(lines, "\n")
+}
+
+// viewMain renders every setting in a single vertically scrolling list.
+// truncateToWidth clips a (possibly styled) line so it always occupies one
+// terminal row. Without this, long lines wrap and push the tab/status bars
+// out of the screen.
+func truncateToWidth(s string, width int) string {
+	if width <= 0 || ansi.StringWidth(s) <= width {
+		return s
 	}
-	if t.showSlotList {
-		return t.viewSlotList()
+	return ansi.Truncate(s, width, "")
+}
+
+func padLabel(label string, width int) string {
+	label = truncateToWidth(label, width)
+	if w := ansi.StringWidth(label); w < width {
+		label += strings.Repeat(" ", width-w)
 	}
-	if t.showTunSettings {
-		return t.viewTunSettings()
+	return label
+}
+
+func (t *SettingsTab) mainLabelWidth() int {
+	limit := t.width - 24
+	if limit < 12 {
+		limit = 12
 	}
-	if t.showSystemProxySettings {
-		return t.viewSystemProxySettings()
+	maxWidth := 0
+	for _, field := range t.fields {
+		if field.fieldType == FieldTypeHeader || field.fieldType == FieldTypeButton {
+			continue
+		}
+		if w := ansi.StringWidth(field.label); w > maxWidth {
+			maxWidth = w
+		}
 	}
+	if maxWidth > limit {
+		maxWidth = limit
+	}
+	return maxWidth
+}
+
+func (t *SettingsTab) viewMain() string {
+	labelWidth := t.mainLabelWidth()
+
 	var lines []string
-	// Track the rendered line index where the focused item starts.
 	focusedLine := 0
-
-	appendBlock := func(block string) {
-		lines = append(lines, strings.Split(block, "\n")...)
-	}
-
 	appendLine := func(line string) {
-		lines = append(lines, line)
+		lines = append(lines, truncateToWidth(line, t.width))
 	}
 
 	for i, field := range t.fields {
 		if field.fieldType == FieldTypeHeader {
-			if i == t.focusedField {
-				focusedLine = len(lines)
+			if len(lines) > 0 {
+				appendLine("")
 			}
-			appendBlock(styles.Title.Render(field.label))
-			appendLine("")
+			appendLine(styles.Primary.Bold(true).Render(field.label))
 			continue
+		}
+
+		focused := i == t.focusedField
+		if focused {
+			focusedLine = len(lines)
+		}
+		marker := "  "
+		if focused {
+			marker = styles.Primary.Render("▶ ")
 		}
 
 		if field.fieldType == FieldTypeButton {
-			if i == t.focusedField {
-				focusedLine = len(lines)
-			}
-			btnLabel := field.label
-			if i == t.focusedField {
-				btnLabel = styles.StatusConnected.Render("▶ [" + btnLabel + "]")
+			btn := "[" + field.label + "]"
+			if focused {
+				btn = styles.StatusConnected.Render(btn)
 			} else {
-				btnLabel = styles.Muted.Render("  [" + btnLabel + "]")
+				btn = styles.Muted.Render(btn)
 			}
-			appendBlock(btnLabel)
-			appendLine("")
+			appendLine(marker + btn)
 			continue
 		}
 
-		if i == t.focusedField {
-			focusedLine = len(lines)
+		label := padLabel(field.label, labelWidth)
+		switch {
+		case field.disabled:
+			label = styles.Muted.Render(label)
+		case focused:
+			label = styles.Primary.Render(label)
 		}
 
-		label := field.label
-		if i == t.focusedField {
-			label = styles.Primary.Render("▶ " + label)
-		} else {
-			label = "  " + label
-		}
-		if field.disabled {
-			label = styles.Muted.Render("  " + field.label)
-		}
-		appendBlock(label)
-		if field.helpText != "" {
-			helpText := "    " + field.helpText
-			if field.disabled {
-				helpText = styles.Muted.Render(helpText)
-			} else {
-				helpText = styles.HelpText.Render(helpText)
-			}
-			appendBlock(helpText)
-		}
-
+		var control string
 		switch field.fieldType {
 		case FieldTypeInput:
-			inputStyle := styles.InputField
-			if i == t.focusedField {
-				inputStyle = styles.InputFocused
-			}
-			appendBlock(inputStyle.Render(field.input.View()))
-			appendLine("")
-
+			control = field.input.View()
 		case FieldTypeSelect:
-			appendBlock(t.renderSelect(field, i == t.focusedField))
-			appendLine("")
-
+			control = t.renderSelect(field, focused)
 		}
+		appendLine(marker + label + "  " + control)
 	}
 
-	// Restart core button (the only virtual button after all fields)
+	// Restart core button (the only virtual button after all fields).
+	appendLine("")
 	restartLabel := i18n.M().Settings.RestartCore
 	if restartLabel == "" {
 		restartLabel = "Restart core"
 	}
-	if t.focusedField == len(t.fields) {
+	restartFocused := t.focusedField == len(t.fields)
+	if restartFocused {
 		focusedLine = len(lines)
-		restartLabel = styles.StatusConnected.Render("▶ [" + restartLabel + "]")
-	} else {
-		restartLabel = styles.Muted.Render("  [" + restartLabel + "]")
 	}
-	appendBlock(restartLabel)
+	restartMarker := "  "
+	if restartFocused {
+		restartMarker = styles.Primary.Render("▶ ")
+	}
+	restart := "[" + restartLabel + "]"
+	if restartFocused {
+		restart = styles.StatusConnected.Render(restart)
+	} else {
+		restart = styles.Muted.Render(restart)
+	}
+	appendLine(restartMarker + restart)
 
 	// Message
 	if t.message != "" && t.messageShow {
 		appendLine("")
 		if t.messageType == "success" {
-			appendBlock(styles.SuccessMessage.Render(t.message))
+			appendLine(styles.SuccessMessage.Render(t.message))
 		} else {
-			appendBlock(styles.ErrorMessage.Render(t.message))
+			appendLine(styles.ErrorMessage.Render(t.message))
 		}
 	}
 
-	// Help (always shown at bottom, outside scrollable area)
-	help := styles.HelpKey.Render("↑↓") + styles.HelpText.Render(" navigate  ") +
-		styles.HelpKey.Render("←/→") + styles.HelpText.Render(" select  ") +
-		styles.HelpKey.Render("Ctrl+R") + styles.HelpText.Render(" restart")
+	// Fixed bottom area: focused field help + key help. The help line is
+	// always reserved (even when empty) so the body does not jump by one row
+	// as focus moves between fields with and without help text.
+	focusedHelp := ""
+	if t.focusedField >= 0 && t.focusedField < len(t.fields) {
+		if helpText := strings.TrimSpace(t.fields[t.focusedField].helpText); helpText != "" {
+			focusedHelp = styles.HelpText.Render("  " + helpText)
+		}
+	}
+	helpLines := []string{
+		truncateToWidth(focusedHelp, t.width),
+		truncateToWidth(
+			styles.HelpKey.Render("↑↓")+styles.HelpText.Render(" navigate  ")+
+				styles.HelpKey.Render("←/→")+styles.HelpText.Render(" select  ")+
+				styles.HelpKey.Render("Enter")+styles.HelpText.Render(" open  ")+
+				styles.HelpKey.Render("L")+styles.HelpText.Render(" logs  ")+
+				styles.HelpKey.Render("Ctrl+R")+styles.HelpText.Render(" restart"),
+			t.width),
+	}
 
-	// If size has not been set yet (tests / early init), render full content without clipping.
+	// If size has not been set yet (tests / early init), render everything.
 	if t.height <= 0 {
 		content := strings.Join(lines, "\n")
-		content += "\n" + help
+		content += "\n" + strings.Join(helpLines, "\n")
 		return styles.ContentArea.Render(content)
 	}
 
-	// Reserve lines for fixed bottom area: help text (1 line).
-	// When scrolling, also reserve 1 line for the scroll indicator (only if enough space).
-	needsScroll := len(lines) > t.height-1
-	showScrollIndicator := needsScroll && t.height > 2
-	reservedBottom := 1 // help line
+	helpHeight := len(helpLines)
+	needsScroll := len(lines) > t.height-helpHeight
+	showScrollIndicator := needsScroll && t.height-helpHeight > 1
+	reservedBottom := helpHeight
 	if showScrollIndicator {
-		reservedBottom = 2 // scroll indicator + help line
+		reservedBottom++
 	}
 	visibleHeight := t.height - reservedBottom
 	if visibleHeight < 1 {
 		visibleHeight = 1
 	}
 
-	// Adjust scroll offset to keep focused item visible.
-	if focusedLine < t.scrollOffset {
-		t.scrollOffset = focusedLine
-	}
-	if focusedLine >= t.scrollOffset+visibleHeight {
-		t.scrollOffset = focusedLine - visibleHeight + 1
-	}
-	if t.scrollOffset < 0 {
-		t.scrollOffset = 0
-	}
-	maxOffset := len(lines) - visibleHeight
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if t.scrollOffset > maxOffset {
-		t.scrollOffset = maxOffset
-	}
-
+	t.scrollOffset = adjustScrollOffset(focusedLine, t.scrollOffset, visibleHeight, len(lines))
 	start := t.scrollOffset
 	end := t.scrollOffset + visibleHeight
 	if end > len(lines) {
 		end = len(lines)
 	}
-	visible := lines[start:end]
 
-	content := strings.Join(visible, "\n")
+	content := strings.Join(lines[start:end], "\n")
 	if showScrollIndicator {
 		scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
 		scrollInfo := lipgloss.NewStyle().
@@ -2594,9 +2679,118 @@ func (t *SettingsTab) View() string {
 			Render(scrollText)
 		content += "\n" + scrollInfo
 	}
-	content += "\n" + help
+	content += "\n" + strings.Join(helpLines, "\n")
 
 	return styles.ContentArea.Render(content)
+}
+
+// viewLogs renders the embedded runtime log viewer.
+func (t *SettingsTab) viewLogs() string {
+	if t.logsTab == nil {
+		return styles.ContentArea.Render(styles.Muted.Render("No logs"))
+	}
+	height := t.height - 1
+	if height < 1 {
+		height = 1
+	}
+	t.logsTab.SetSize(t.width, height)
+	hint := styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
+	return styles.ContentArea.Render(hint + "\n" + t.logsTab.View())
+}
+
+// fieldIndexByKey returns the index in t.fields for the given key, or -1.
+func (t *SettingsTab) fieldIndexByKey(key string) int {
+	for i := range t.fields {
+		if t.fields[i].key == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// focusNextField returns the next focusable field index, skipping headers/disabled.
+func focusNextField(fields []settingField, current int) int {
+	next := current + 1
+	if next >= len(fields) {
+		next = 0
+	}
+	for range fields {
+		if next >= len(fields) {
+			next = 0
+		}
+		f := fields[next]
+		if f.fieldType != FieldTypeHeader && !f.disabled {
+			return next
+		}
+		next++
+	}
+	return -1
+}
+
+// focusPrevField returns the previous focusable field index.
+func focusPrevField(fields []settingField, current int) int {
+	prev := current - 1
+	if prev < 0 {
+		prev = len(fields) - 1
+	}
+	for range fields {
+		if prev < 0 {
+			prev = len(fields) - 1
+		}
+		f := fields[prev]
+		if f.fieldType != FieldTypeHeader && !f.disabled {
+			return prev
+		}
+		prev--
+	}
+	return -1
+}
+
+func (t *SettingsTab) moveFieldFocus(fields []settingField, current *int, direction int) {
+	if current == nil || len(fields) == 0 {
+		return
+	}
+
+	next := focusNextField(fields, *current)
+	if direction < 0 {
+		next = focusPrevField(fields, *current)
+	}
+	if next < 0 {
+		return
+	}
+
+	if *current >= 0 && *current < len(fields) && fields[*current].fieldType == FieldTypeInput {
+		fields[*current].input.Blur()
+	}
+
+	*current = next
+	if fields[next].fieldType == FieldTypeInput {
+		fields[next].input.Focus()
+		t.armedReplace = true
+		return
+	}
+	t.armedReplace = false
+}
+
+// adjustScrollOffset keeps the focused line visible within the viewport.
+func adjustScrollOffset(focusedLine, scrollOffset, visibleHeight, maxLines int) int {
+	if focusedLine < scrollOffset {
+		scrollOffset = focusedLine
+	}
+	if focusedLine >= scrollOffset+visibleHeight {
+		scrollOffset = focusedLine - visibleHeight + 1
+	}
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	maxOffset := maxLines - visibleHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
+	}
+	return scrollOffset
 }
 
 func (t *SettingsTab) viewSlotList() string {
@@ -2687,11 +2881,7 @@ func (t *SettingsTab) viewSlotDetail() string {
 
 		switch field.fieldType {
 		case FieldTypeInput:
-			inputStyle := styles.InputField
-			if i == t.slotFocusedField {
-				inputStyle = styles.InputFocused
-			}
-			appendBlock(inputStyle.Render(field.input.View()))
+			appendBlock("    " + field.input.View())
 			appendLine("")
 		case FieldTypeSelect:
 			appendBlock(t.renderSelect(field, i == t.slotFocusedField))
@@ -2728,23 +2918,7 @@ func (t *SettingsTab) viewSlotDetail() string {
 		visibleHeight = 1
 	}
 
-	if focusedLine < t.slotScrollOffset {
-		t.slotScrollOffset = focusedLine
-	}
-	if focusedLine >= t.slotScrollOffset+visibleHeight {
-		t.slotScrollOffset = focusedLine - visibleHeight + 1
-	}
-	if t.slotScrollOffset < 0 {
-		t.slotScrollOffset = 0
-	}
-	maxOffset := len(lines) - visibleHeight
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if t.slotScrollOffset > maxOffset {
-		t.slotScrollOffset = maxOffset
-	}
-
+	t.slotScrollOffset = adjustScrollOffset(focusedLine, t.slotScrollOffset, visibleHeight, len(lines))
 	start := t.slotScrollOffset
 	end := t.slotScrollOffset + visibleHeight
 	if end > len(lines) {
@@ -2756,7 +2930,7 @@ func (t *SettingsTab) viewSlotDetail() string {
 		scrollText := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(lines))
 		scrollInfo := lipgloss.NewStyle().
 			Foreground(styles.MutedColor).
-			Width(t.width).
+			Width(t.panelWidth()).
 			Align(lipgloss.Right).
 			Render(scrollText)
 		content += "\n" + scrollInfo
@@ -2828,21 +3002,60 @@ func (t *SettingsTab) renderSelect(field settingField, focused bool) string {
 func (t *SettingsTab) SetSize(width, height int) {
 	t.width = width
 	t.height = height
+
+	// Top-level inputs sit inline on a single row, so keep them compact.
+	mainInputWidth := 16
+	if maxWidth := width - 24; mainInputWidth > maxWidth {
+		mainInputWidth = maxWidth
+	}
+	if mainInputWidth < 8 {
+		mainInputWidth = 8
+	}
 	for i := range t.fields {
 		if t.fields[i].fieldType == FieldTypeInput {
-			t.fields[i].input.Width = width / 2
+			t.fields[i].input.Width = mainInputWidth
 		}
+	}
+
+	// Secondary pages can afford wider inputs, but still avoid filling the
+	// whole terminal width.
+	subInputWidth := width - 8
+	if subInputWidth > 40 {
+		subInputWidth = 40
+	}
+	if subInputWidth < 8 {
+		subInputWidth = 8
 	}
 	for i := range t.slotFields {
 		if t.slotFields[i].fieldType == FieldTypeInput {
-			t.slotFields[i].input.Width = width / 2
+			t.slotFields[i].input.Width = subInputWidth
 		}
 	}
 	for i := range t.upstreamFields {
 		if t.upstreamFields[i].fieldType == FieldTypeInput {
-			t.upstreamFields[i].input.Width = width / 2
+			t.upstreamFields[i].input.Width = subInputWidth
 		}
 	}
+	for i := range t.tunFields {
+		if t.tunFields[i].fieldType == FieldTypeInput {
+			t.tunFields[i].input.Width = subInputWidth
+		}
+	}
+	for i := range t.systemProxyFields {
+		if t.systemProxyFields[i].fieldType == FieldTypeInput {
+			t.systemProxyFields[i].input.Width = subInputWidth
+		}
+	}
+	if t.logsTab != nil {
+		t.logsTab.SetSize(width, height)
+	}
+}
+
+func (t *SettingsTab) panelWidth() int {
+	if t.width > 0 {
+		return t.width
+	}
+	return 80
 }
 
 func (t *SettingsTab) saveSettings() tea.Cmd {
@@ -2978,9 +3191,10 @@ func (t *SettingsTab) saveSettings() tea.Cmd {
 			}
 		}
 
-		if err := t.cfg.Save(); err != nil {
+		if err := persistConfig(t.cfg, t.slotMgr); err != nil {
 			return SettingsErrorMsg{Error: err}
 		}
+		t.markTopLevelInputBaselines()
 
 		// Root-only side effects (Linux): apply/remove docker hijack iptables rules.
 		notice := ""
@@ -3082,11 +3296,10 @@ func (t *SettingsTab) fetchSystemInfo() tea.Cmd {
 
 func (t *SettingsTab) viewSystemInfo() string {
 	title := styles.Title.Render("System Info")
-	help := styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
 
 	if t.systemInfo == nil {
 		content := title + "\n\n  Loading..."
-		content += "\n\n" + help
+		content += "\n\n" + styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
 		return styles.ContentArea.Render(content)
 	}
 
@@ -3111,7 +3324,7 @@ func (t *SettingsTab) viewSystemInfo() string {
 		line := fmt.Sprintf("  %-16s %s", r.k, val)
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", help)
+	lines = append(lines, "", styles.HelpKey.Render("Esc")+styles.HelpText.Render(" back"))
 
 	return styles.ContentArea.Render(strings.Join(lines, "\n"))
 }

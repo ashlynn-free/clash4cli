@@ -2,12 +2,15 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 )
+
+var errDaemonDifferentHome = errors.New("c4cd on the local port belongs to a different CLASH4CLI_HOME")
 
 func FindDaemonBinary() (string, error) {
 	execPath, err := os.Executable()
@@ -31,6 +34,16 @@ func EnsureDaemon(ctx context.Context) (*Client, *AuthorityInfo, error) {
 		if _, _, healthErr := client.Health(ctx); healthErr == nil {
 			return client, info, nil
 		}
+	}
+
+	// The authority files can be lost while a daemon is still running (for
+	// example if a failed duplicate start cleaned them up). Probe the fixed
+	// local port before spawning a second daemon, which would only fail with
+	// "address already in use".
+	if adoptedClient, adoptedInfo, adoptErr := adoptRunningDaemon(ctx, defaultPort); adoptErr == nil {
+		return adoptedClient, adoptedInfo, nil
+	} else if errors.Is(adoptErr, errDaemonDifferentHome) {
+		return nil, nil, adoptErr
 	}
 
 	if info, err := ReadAuthorityInfo(); err == nil && info != nil {
@@ -69,4 +82,33 @@ func EnsureDaemon(ctx context.Context) (*Client, *AuthorityInfo, error) {
 		}
 	}
 	return nil, nil, fmt.Errorf("c4cd did not become healthy in time")
+}
+
+// adoptRunningDaemon attaches to a healthy daemon already listening on the
+// given loopback port and rewrites its authority files so future launches find
+// it normally. It only adopts a daemon that belongs to the current home.
+func adoptRunningDaemon(ctx context.Context, port int) (*Client, *AuthorityInfo, error) {
+	client := NewClientFromPort(port)
+	info, _, err := client.Health(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info == nil || info.PID <= 0 {
+		return nil, nil, fmt.Errorf("daemon on port %d returned an invalid identity", port)
+	}
+
+	fingerprint, err := HomeFingerprint()
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.HomeFingerprint != "" && info.HomeFingerprint != fingerprint {
+		return nil, nil, fmt.Errorf("%w (pid %d, port %d)", errDaemonDifferentHome, info.PID, port)
+	}
+
+	// Self-heal the authority files. These failures are not fatal: the client
+	// is already connected and can still be used for this session.
+	_ = WriteDaemonPID(info.PID)
+	_ = WriteAuthorityInfo(info)
+
+	return client, info, nil
 }

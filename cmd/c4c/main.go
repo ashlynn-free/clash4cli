@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"rocket4cli/internal/app"
+	"rocket4cli/internal/daemon"
 )
 
 // Version information (set via ldflags)
@@ -25,6 +28,28 @@ func main() {
 			return
 		case "-h", "--help", "help":
 			printHelp()
+			return
+		case "--stop", "stop":
+			result, err := daemon.StopDaemon()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			if result.WasRunning {
+				fmt.Printf("c4cd stopped (pid %d)\n", result.PID)
+			} else {
+				fmt.Println("c4cd is not running")
+			}
+			return
+		case "--restart", "restart":
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			_, info, err := daemon.RestartDaemon(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("c4cd restarted (pid %d, port %d)\n", info.PID, info.Port)
 			return
 		}
 	}
@@ -61,19 +86,37 @@ func printHelp() {
 
 Usage:
   c4c                Start the TUI interface
+  c4c --stop         Stop the running c4cd daemon (SIGTERM, then SIGKILL after 1s)
+  c4c --restart      Restart c4cd in the background
   c4c -v             Show version
   c4c -h             Show this help
 
+Run any command through the proxy (c4cgo):
+  c4cgo <command> [args...]          Run a command through the active proxy slot
+  c4cgo -s N <command>               Use proxy slot N (0-9)
+  c4cgo --port PORT <command>        Use an explicit mixed proxy port
+  c4cgo --mode MODE <command>        auto|proxychains|env (default: auto)
+  c4cgo --strict <command>           Fail closed (default on macOS)
+  c4cgo --no-strict <command>        Disable the fail-closed sandbox
+  c4cgo -v <command>                 Show proxy details
+  c4cgo --help                       Show full c4cgo usage
+
+Examples:
+  c4cgo curl https://ip.sb
+  c4cgo git clone https://github.com/user/repo.git
+  c4cgo --no-strict npm install
+
 Keyboard shortcuts (in TUI):
-  Tab                  Switch tabs (Nodes/Subscriptions/Settings/Logs)
+  Tab                  Switch tabs (Slots/Subscriptions/Settings)
   j/k or ↑/↓          Navigate lists
-  Enter               (Nodes) Slot 0: cycle mode (Rule/Global/Disconnect); (Subscriptions) Set active subscription
-  0-9                 (Nodes) Assign focused node to proxy slot 0-9
-  t                   Test all nodes speed
+  Enter               Open the selected node/subscription browser
+  0-9                 (Slots) Assign a node to proxy slot 0-9
+  t                   Test the selected node/slot
+  T                   Test all nodes/slots
   a                   Add subscription (in Subscriptions tab)
   d                   Delete subscription (in Subscriptions tab)
   u                   Update subscription (in Subscriptions tab)
-  q/Ctrl+C            Quit (proxy keeps running)
+  q/Ctrl+C            Quit the TUI (proxy slots keep running in c4cd)
 
 Data directory: ~/.clash4cli/
 `)

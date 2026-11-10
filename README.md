@@ -52,7 +52,7 @@ proxy:
 
 ### `c4cgo`
 
-`c4cgo` 会读取 `~/.clash4cli/proxy.lock`，自动使用当前代理端口（有 `proxychains4` 时优先用它，否则回退到环境变量代理）。
+`c4cgo` 会读取 `~/.clash4cli/proxy.lock`，自动使用当前代理端口。默认使用 `proxychains4`；找不到时会直接报错，可用 `--mode env` 显式选择不安全的回退方式。
 
 示例：`curl` 走代理
 
@@ -80,6 +80,17 @@ proxy:
   "readme": "https://ipinfo.io/missingauth"
 }
 ```
+
+#### 流量泄漏防护
+
+`c4cgo` 在 macOS 上默认启用 `--strict`（内核级沙箱），确保被代理进程不会漏流量：
+
+- 只允许 loopback（代理端口、本地服务）和 Unix socket；远程 TCP、UDP/QUIC、DNS、ICMP 全部失败即阻断，不会直连。
+- 拒绝无法被 proxychains 注入的目标：macOS SIP 系统二进制、setuid/setgid 程序、Linux 静态链接程序、Linux 上的 Go 二进制（Go 直接使用系统调用，会绕过 LD_PRELOAD），以及使用 `#!/bin/sh` 等受保护解释器的脚本。
+- 把 `#!/usr/bin/env <program>` 脚本（例如 `npm`、`yarn`）重写为直接调用解释器，避免 `/usr/bin/env` 剥离 `DYLD_INSERT_LIBRARIES` 导致静默泄漏。
+- 如确需关闭：`--no-strict`（不推荐）。Linux 没有等价的无 root 沙箱，需要全量覆盖请使用 mihomo TUN 模式。
+
+注意：proxychains 只代理 TCP 与 DNS。没有 `--strict` 时，UDP/QUIC/ICMP 和无法注入的程序仍可能绕过代理；`--mode env` 只设置环境变量，不拦截流量。
 
 ## 🗂️ 数据目录
 

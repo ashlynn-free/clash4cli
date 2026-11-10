@@ -55,6 +55,7 @@ func TestServerLoopbackOnlyListener(t *testing.T) {
 	cfg := config.DefaultConfig()
 	slotMgr := proxy.NewSlotManager(cfg)
 	s := NewServer(cfg, slotMgr)
+	s.port = 0 // let the OS pick a free port so tests can run beside a real daemon
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

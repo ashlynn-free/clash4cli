@@ -100,6 +100,10 @@ type trafficSnapshot struct {
 
 // New creates a new TUI model
 func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager, slotMgr proxy.SlotService, daemonLogCh <-chan logger.Entry, version string, startupWarning string) *Model {
+	logsTab := tabs.NewLogsTab()
+	settingsTab := tabs.NewSettingsTab(cfg, slotMgr, version)
+	settingsTab.SetLogsTab(logsTab)
+
 	m := &Model{
 		cfg:             cfg,
 		subManager:      subMgr,
@@ -109,8 +113,8 @@ func New(cfg *config.Config, subMgr *subscription.Manager, nodeMgr *node.Manager
 		statusBar:       components.NewStatusBar(),
 		slotsTab:        tabs.NewSlotsTab(cfg, subMgr, slotMgr, nodeMgr),
 		subsTab:         tabs.NewSubscriptionsTab(subMgr, slotMgr, nodeMgr),
-		settingsTab:     tabs.NewSettingsTab(cfg, slotMgr, version),
-		logsTab:         tabs.NewLogsTab(),
+		settingsTab:     settingsTab,
+		logsTab:         logsTab,
 		version:         strings.TrimSpace(version),
 		startupWarning:  strings.TrimSpace(startupWarning),
 		slotTrafficLast: make(map[int]trafficSnapshot),
@@ -458,6 +462,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slotsOverlay := m.activeTab == TabSlots && m.slotsTab != nil && m.slotsTab.BlocksGlobalKeys()
 		subOverlay := m.activeTab == TabSubscriptions && m.subsTab != nil && m.subsTab.BlocksGlobalKeys()
 		blockGlobal := slotsOverlay || subOverlay
+		settingsInput := m.activeTab == TabSettings && m.settingsTab != nil && m.settingsTab.HasFocusedInput()
 
 		// Global keys
 		switch {
@@ -478,23 +483,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("1"))):
-			if !blockGlobal {
+			if !blockGlobal && !settingsInput {
 				m.setTab(TabSlots)
 				return m, nil
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("2"))):
-			if !blockGlobal {
+			if !blockGlobal && !settingsInput {
 				m.setTab(TabSubscriptions)
 				return m, nil
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("3"))):
-			if !blockGlobal {
+			if !blockGlobal && !settingsInput {
 				m.setTab(TabSettings)
-				return m, nil
-			}
-		case key.Matches(msg, key.NewBinding(key.WithKeys("4"))):
-			if !blockGlobal {
-				m.setTab(TabLogs)
 				return m, nil
 			}
 		}
@@ -779,8 +779,13 @@ func (m *Model) View() string {
 	// styles.TabBar has BorderBottom(true), so renderTabBar() renders 2 lines:
 	//   line 1: tab name text
 	//   line 2: bottom border ────
-	// Therefore contentHeight = m.height - 2 (tab bar) - 1 (status bar) = m.height - 3.
-	contentHeight := m.height - 3
+	// Therefore contentHeight = m.height - 2 (tab bar) - 1 (status bar) - 1
+	// (safety row) = m.height - 4.
+	//
+	// The extra safety row matters on terminals that count one more row than
+	// they display (or scroll when the bottom-right cell is written): without
+	// it the whole frame scrolls up by one line and the tab bar disappears.
+	contentHeight := m.height - 4
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -834,7 +839,6 @@ func (m *Model) renderTabBar() string {
 		"1 " + msgs.Tabs.Slots,
 		"2 " + msgs.Tabs.Subscription,
 		"3 " + msgs.Tabs.Settings,
-		"4 " + msgs.Tabs.Logs,
 	}
 	if strings.TrimSpace(tabNames[0]) == "" {
 		tabNames[0] = "Slots"
@@ -946,7 +950,6 @@ func (m *Model) tabHitTest(x int) (Tab, bool) {
 		"1 " + msgs.Tabs.Slots,
 		"2 " + msgs.Tabs.Subscription,
 		"3 " + msgs.Tabs.Settings,
-		"4 " + msgs.Tabs.Logs,
 	}
 	if strings.TrimSpace(tabNames[0]) == "" {
 		tabNames[0] = "Slots"
@@ -986,15 +989,15 @@ func (m *Model) renderActiveTab() string {
 }
 
 func (m *Model) nextTab() {
-	m.activeTab = Tab((int(m.activeTab) + 1) % 4)
+	m.activeTab = Tab((int(m.activeTab) + 1) % 3)
 }
 
 func (m *Model) prevTab() {
-	m.activeTab = Tab((int(m.activeTab) + 3) % 4)
+	m.activeTab = Tab((int(m.activeTab) + 2) % 3)
 }
 
 func (m *Model) setTab(t Tab) {
-	if t < TabSlots || t > TabLogs {
+	if t < TabSlots || t > TabSettings {
 		return
 	}
 	m.activeTab = t
@@ -1028,8 +1031,9 @@ func wrapPlainText(s string, width int) string {
 }
 
 func (m *Model) updateSizes() {
-	// Content height: tab bar is 2 lines (text + BorderBottom) + status bar is 1 line.
-	contentHeight := m.height - 3
+	// Content height: tab bar is 2 lines (text + BorderBottom) + status bar is
+	// 1 line + 1 safety row (see Model.View).
+	contentHeight := m.height - 4
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
