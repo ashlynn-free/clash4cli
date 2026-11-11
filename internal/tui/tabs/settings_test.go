@@ -49,9 +49,15 @@ func TestSettingsTab_FocusWrapsThroughRestartButton(t *testing.T) {
 	cfg := config.DefaultConfig()
 	tab := NewSettingsTab(cfg, nil, "dev")
 
-	last := fieldIndexByKey(tab.fields, "show_logs")
+	last := -1
+	for i := len(tab.fields) - 1; i >= 0; i-- {
+		if tab.fields[i].fieldType != FieldTypeHeader && !tab.fields[i].disabled {
+			last = i
+			break
+		}
+	}
 	if last < 0 {
-		t.Fatal("expected show_logs field")
+		t.Fatal("expected a focusable field")
 	}
 	tab.focusField(last)
 
@@ -675,5 +681,105 @@ func TestSettingsTab_SaveSettingsTriggersTunRestart(t *testing.T) {
 	msg = tab.saveSettings()()
 	if _, ok := msg.(SettingsSavedMsg); !ok {
 		t.Fatalf("expected SettingsSavedMsg when TUN unchanged, got %T", msg)
+	}
+}
+
+func TestSettingsTab_ConnectionsButtonOpensView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+
+	idx := tab.fieldIndexByKey("show_connections")
+	if idx < 0 {
+		t.Fatalf("expected show_connections field")
+	}
+	tab.focusedField = idx
+
+	tab, cmd := tab.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if tab.activeSubPage != settingsSubPageConnections {
+		t.Fatalf("expected connections sub-page, got %v", tab.activeSubPage)
+	}
+	if cmd == nil {
+		t.Fatalf("expected a connection fetch command")
+	}
+}
+
+func TestSettingsTab_ConnectionsViewShowsPathAndTraffic(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+	tab.width = 140
+	tab.height = 30
+	tab.activeSubPage = settingsSubPageConnections
+	tab.connItems = []slotConnection{{
+		SlotID: 0,
+		ConnectionInfo: proxy.ConnectionInfo{
+			ID:              "conn-1",
+			Host:            "api.example.com",
+			DestinationPort: "443",
+			Chains:          []string{"slot-0-upstream", "GLOBAL"},
+			Download:        2048,
+			Upload:          1024,
+		},
+		DownRate: 100,
+		UpRate:   50,
+		Entry:    "0:17890",
+		Transit:  "美国-US-1",
+		Exit:     "US NY",
+	}}
+	tab.connDownloadTotal = 2048
+	tab.connUploadTotal = 1024
+	tab.updateConnectionRows()
+
+	view := tab.viewConnections()
+	for _, want := range []string{"Connections", "api.example.com:443", "Entry", "Transit", "Exit", "0:17890", "美国-US-1", "US NY"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected view to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestConnectionPath_UpstreamAndDirect(t *testing.T) {
+	state := &proxy.SlotState{
+		SlotID:          0,
+		Port:            17890,
+		NodeName:        "美国-US-1",
+		UpstreamEnabled: true,
+		UpstreamServer:  "63.246.132.189",
+		UpstreamPort:    5507,
+	}
+
+	entry, transit, exit := connectionPath(state, proxy.ConnectionInfo{
+		Chains: []string{"slot-0-upstream", "GLOBAL"},
+	}, "US NY")
+	if entry != "0:17890" || transit != "美国-US-1" || exit != "US NY" {
+		t.Fatalf("upstream path = %q / %q / %q", entry, transit, exit)
+	}
+
+	// A connection that bypasses the upstream uses the node as its exit.
+	entry, transit, exit = connectionPath(state, proxy.ConnectionInfo{
+		Chains: []string{"HK-01", "Proxy"},
+	}, "US NY")
+	if entry != "0:17890" || transit != "-" || exit != "HK-01" {
+		t.Fatalf("direct path = %q / %q / %q", entry, transit, exit)
+	}
+
+	// Chain order must not matter when picking the outbound proxy.
+	if got := connectionExitProxy([]string{"Proxy", "HK-01"}); got != "HK-01" {
+		t.Fatalf("connectionExitProxy group-first = %q, want HK-01", got)
+	}
+	if got := connectionExitProxy([]string{"GLOBAL", "slot-0-upstream"}); got != "slot-0-upstream" {
+		t.Fatalf("connectionExitProxy group-first = %q, want slot-0-upstream", got)
+	}
+}
+
+func TestSettingsTab_UpperCOpensConnections(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab := NewSettingsTab(cfg, nil, "dev")
+
+	tab, cmd := tab.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
+	if tab.activeSubPage != settingsSubPageConnections {
+		t.Fatalf("expected connections sub-page, got %v", tab.activeSubPage)
+	}
+	if cmd == nil {
+		t.Fatalf("expected a connection fetch command")
 	}
 }

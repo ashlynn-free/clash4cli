@@ -15,7 +15,7 @@ func TestServerHealthAndRuntimeHandlers(t *testing.T) {
 	t.Setenv("CLASH4CLI_HOME", t.TempDir())
 	cfg := config.DefaultConfig()
 	slotMgr := proxy.NewSlotManager(cfg)
-	s := NewServer(cfg, slotMgr)
+	s := NewServer(cfg, slotMgr, "test")
 	s.info = &AuthorityInfo{PID: 123, Port: 47189, APIVersion: APIVersion, HomeFingerprint: "fp", Executable: "/tmp/c4cd", StartedAt: "2026-01-01T00:00:00Z"}
 
 	healthReq := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -54,7 +54,7 @@ func TestServerLoopbackOnlyListener(t *testing.T) {
 	t.Setenv("CLASH4CLI_HOME", t.TempDir())
 	cfg := config.DefaultConfig()
 	slotMgr := proxy.NewSlotManager(cfg)
-	s := NewServer(cfg, slotMgr)
+	s := NewServer(cfg, slotMgr, "test")
 	s.port = 0 // let the OS pick a free port so tests can run beside a real daemon
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -2,11 +2,11 @@ package proxy
 
 import (
 	"fmt"
-	"rocket4cli/internal/logger"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"rocket4cli/internal/logger"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -82,6 +82,11 @@ func (sc *SlotController) GetTrafficTotals() (int64, int64, error) {
 // GetTrafficAndConnCount returns traffic totals and active connection count.
 func (sc *SlotController) GetTrafficAndConnCount() (int64, int64, int, error) {
 	return sc.ctrl.GetTrafficAndConnCount()
+}
+
+// GetConnections returns the active connections for this slot.
+func (sc *SlotController) GetConnections() (ConnectionsSnapshot, error) {
+	return sc.ctrl.GetConnections()
 }
 
 // GetCoreVersion returns the mihomo core version string.

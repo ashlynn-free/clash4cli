@@ -20,6 +20,7 @@ type SlotService interface {
 	StopSlot(slotID int) error
 	StopAll()
 	GetTrafficAndConnCountForSlot(slotID int) (int64, int64, int, error)
+	GetConnectionsForSlot(slotID int) (ConnectionsSnapshot, error)
 	GetCoreVersion(slotID int) (string, error)
 	GetRulesCount(slotID int) (int, error)
 	GetStartedAt(slotID int) (string, error)

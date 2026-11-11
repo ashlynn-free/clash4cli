@@ -86,6 +86,32 @@ func (s *Server) handleSlotRoutes(w http.ResponseWriter, r *http.Request) {
 		s.onRuntimeMutation()
 		state := s.slotMgr.GetSlotState(slotID)
 		s.writeJSON(w, http.StatusOK, state)
+	case "traffic":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		up, down, count, err := s.slotMgr.GetTrafficAndConnCountForSlot(slotID)
+		if err != nil {
+			s.writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]any{
+			"upload_total":   up,
+			"download_total": down,
+			"conn_count":     count,
+		})
+	case "connections":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		snapshot, err := s.slotMgr.GetConnectionsForSlot(slotID)
+		if err != nil {
+			s.writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		s.writeJSON(w, http.StatusOK, snapshot)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}

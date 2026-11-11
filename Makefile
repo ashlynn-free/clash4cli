@@ -202,12 +202,10 @@ clean:
 	@rm -rf $(DIST_DIR)
 	@rm -f $(BINARY_NAME) $(RGO_NAME) $(DAEMON_NAME)
 
-# Install to /usr/local/bin
+# Install to /usr/local/bin (atomic replace via scripts/install_bins.sh)
 install: build
 	@echo "Installing to /usr/local/bin..."
-	sudo cp $(BINARY_NAME) /usr/local/bin/
-	sudo cp $(RGO_NAME) /usr/local/bin/
-	sudo cp $(DAEMON_NAME) /usr/local/bin/
+	sudo bash scripts/install_bins.sh $(BINARY_NAME) $(RGO_NAME) $(DAEMON_NAME)
 	@echo "Done. Run 'c4c' to start, or 'c4cd' for daemon mode."
 
 # Uninstall

@@ -13,8 +13,16 @@ import (
 	"time"
 
 	"rocket4cli/internal/logger"
+	"rocket4cli/internal/proxy"
 	"rocket4cli/internal/subscription"
 )
+
+// SlotTraffic is the traffic summary for one slot.
+type SlotTraffic struct {
+	UploadTotal   int64 `json:"upload_total"`
+	DownloadTotal int64 `json:"download_total"`
+	ConnCount     int   `json:"conn_count"`
+}
 
 type Client struct {
 	httpClient *http.Client
@@ -88,6 +96,24 @@ func (c *Client) StartSlotWithMode(ctx context.Context, slotID int, subID string
 
 func (c *Client) StopSlot(ctx context.Context, slotID int) error {
 	return c.getJSON(ctx, http.MethodPost, "/slots/"+strconv.Itoa(slotID)+"/stop", map[string]any{}, nil)
+}
+
+// Traffic returns the traffic totals and active connection count for a slot.
+func (c *Client) Traffic(ctx context.Context, slotID int) (*SlotTraffic, error) {
+	var out SlotTraffic
+	if err := c.getJSON(ctx, http.MethodGet, "/slots/"+strconv.Itoa(slotID)+"/traffic", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Connections returns the active connections for a slot.
+func (c *Client) Connections(ctx context.Context, slotID int) (*proxy.ConnectionsSnapshot, error) {
+	var out proxy.ConnectionsSnapshot
+	if err := c.getJSON(ctx, http.MethodGet, "/slots/"+strconv.Itoa(slotID)+"/connections", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *Client) SetSlotMode(ctx context.Context, slotID int, mode string) error {

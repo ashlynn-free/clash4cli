@@ -185,6 +185,17 @@ func parseEnvShebang(envArgs []string) (program string, programArgs []string, er
 	return "", nil, fmt.Errorf("env shebang does not name a program")
 }
 
+// notInterceptableError reports a target that dynamic-linker injection cannot
+// reach, so proxychains would silently leave its traffic unproxied.
+type notInterceptableError struct {
+	path   string
+	reason string
+}
+
+func (e *notInterceptableError) Error() string {
+	return fmt.Sprintf("%s %s; the dynamic linker ignores the injection, so its traffic would NOT be proxied", e.path, e.reason)
+}
+
 // validateInterceptable rejects executables that would silently bypass the proxy.
 func validateInterceptable(path string) error {
 	info, err := os.Stat(path)
@@ -196,6 +207,11 @@ func validateInterceptable(path string) error {
 	}
 	if runtime.GOOS == "darwin" && isSIPProtectedDarwinPath(path) {
 		return fmt.Errorf("%s is a macOS SIP-protected system binary; DYLD injection is stripped, so its traffic would NOT be proxied", path)
+	}
+	if runtime.GOOS == "darwin" {
+		if reason, blocked := darwinInjectionBlocked(path); blocked {
+			return &notInterceptableError{path: path, reason: reason}
+		}
 	}
 	if runtime.GOOS == "linux" {
 		static, err := isStaticELF(path)

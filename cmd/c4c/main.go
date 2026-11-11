@@ -116,6 +116,7 @@ Keyboard shortcuts (in TUI):
   a                   Add subscription (in Subscriptions tab)
   d                   Delete subscription (in Subscriptions tab)
   u                   Update subscription (in Subscriptions tab)
+  C                   (Settings) Open the live connections view
   q/Ctrl+C            Quit the TUI (proxy slots keep running in c4cd)
 
 Data directory: ~/.clash4cli/

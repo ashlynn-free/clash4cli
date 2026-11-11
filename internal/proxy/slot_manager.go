@@ -39,7 +39,7 @@ type SlotManager struct {
 	// Callback to save slot history to config
 	saveHistoryFunc func(h []config.SlotHistoryEntry)
 	// Persistent slot history: maps slotID to historical state (preserved when slots stop)
-	slotHistory [MaxSlots]*config.SlotHistoryEntry
+	slotHistory          [MaxSlots]*config.SlotHistoryEntry
 	lockProjectionWriter func(*MultiLockFile) error
 }
 
@@ -302,6 +302,23 @@ func (sm *SlotManager) GetTrafficAndConnCountForSlot(slotID int) (int64, int64, 
 	return sc.GetTrafficAndConnCount()
 }
 
+// GetConnectionsForSlot returns the active connections for a running slot.
+func (sm *SlotManager) GetConnectionsForSlot(slotID int) (ConnectionsSnapshot, error) {
+	if slotID < 0 || slotID >= MaxSlots {
+		return ConnectionsSnapshot{}, fmt.Errorf("invalid slot ID: %d", slotID)
+	}
+
+	sm.mu.RLock()
+	sc := sm.slots[slotID]
+	sm.mu.RUnlock()
+
+	if sc == nil {
+		return ConnectionsSnapshot{}, fmt.Errorf("slot %d is not running", slotID)
+	}
+
+	return sc.GetConnections()
+}
+
 // GetCoreVersion returns the mihomo core version for a slot.
 func (sm *SlotManager) GetCoreVersion(slotID int) (string, error) {
 	if slotID < 0 || slotID >= MaxSlots {
@@ -489,7 +506,7 @@ func (sm *SlotManager) SyncFromLockFile() {
 		}
 
 		logger.Info("Restored slot %d from lock file (pid=%d, port=%d, node=%s)", slotID, lock.PID, lock.Port, lock.Node)
-			logger.Info("[slot%d] Restored slot %d (PID: %d, port: %d)", slotID, slotID, lock.PID, lock.Port)
+		logger.Info("[slot%d] Restored slot %d (PID: %d, port: %d)", slotID, slotID, lock.PID, lock.Port)
 
 		// Apply non-default mode to mihomo after it's ready
 		if restoredMode != "rule" {
@@ -598,7 +615,6 @@ func (sm *SlotManager) writeLockFileLocked() {
 	// Also save slot history to config for UI display on restart
 	sm.saveSlotHistoryLocked()
 }
-
 
 func (sm *SlotManager) saveSlotHistoryLocked() {
 	if sm.cfg == nil {

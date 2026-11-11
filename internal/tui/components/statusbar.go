@@ -173,6 +173,11 @@ func FormatRateWithUnit(bytesPerSec int64, unit string) string {
 	return FormatRate(bytesPerSec)
 }
 
+// FormatBytes formats a byte count into a human-readable string.
+func FormatBytes(b int64) string {
+	return formatBytes(b)
+}
+
 func formatBytes(b int64) string {
 	if b < 0 {
 		return "-"

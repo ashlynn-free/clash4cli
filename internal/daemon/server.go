@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,7 @@ type Server struct {
 	listener   net.Listener
 	httpSrv    *http.Server
 	port       int
+	version    string
 	revision   atomic.Uint64
 	privileged bool
 	info       *AuthorityInfo
@@ -43,12 +45,12 @@ type Server struct {
 	logHub     *logStreamHub
 }
 
-
-func NewServer(cfg *config.Config, slotMgr *proxy.SlotManager) *Server {
+func NewServer(cfg *config.Config, slotMgr *proxy.SlotManager, version string) *Server {
 	s := &Server{
 		cfg:        cfg,
 		slotMgr:    slotMgr,
 		port:       defaultPort,
+		version:    strings.TrimSpace(version),
 		privileged: os.Geteuid() == 0,
 		logHub:     newLogStreamHub(),
 	}
@@ -67,7 +69,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	lock, err := ensureSingleAuthority(paths)
+	lock, err := ensureSingleAuthority(paths, s.port)
 	if err != nil {
 		return err
 	}
@@ -83,7 +85,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.port = tcpAddr.Port
 	}
 
-	info, err := NewAuthorityInfo(s.port, APIVersion, s.privileged)
+	info, err := NewAuthorityInfo(s.port, APIVersion, s.version, s.privileged)
 	if err != nil {
 		_ = listener.Close()
 		lock.release()

@@ -110,7 +110,25 @@ func (d *daemonSlotService) StopAll() {
 }
 
 func (d *daemonSlotService) GetTrafficAndConnCountForSlot(slotID int) (int64, int64, int, error) {
-	return 0, 0, 0, nil
+	if d == nil || d.client == nil {
+		return 0, 0, 0, fmt.Errorf("daemon client is nil")
+	}
+	traffic, err := d.client.Traffic(context.Background(), slotID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return traffic.UploadTotal, traffic.DownloadTotal, traffic.ConnCount, nil
+}
+
+func (d *daemonSlotService) GetConnectionsForSlot(slotID int) (proxy.ConnectionsSnapshot, error) {
+	if d == nil || d.client == nil {
+		return proxy.ConnectionsSnapshot{}, fmt.Errorf("daemon client is nil")
+	}
+	snapshot, err := d.client.Connections(context.Background(), slotID)
+	if err != nil {
+		return proxy.ConnectionsSnapshot{}, err
+	}
+	return *snapshot, nil
 }
 
 func (d *daemonSlotService) GetCoreVersion(slotID int) (string, error) {

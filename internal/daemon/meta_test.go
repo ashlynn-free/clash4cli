@@ -73,7 +73,7 @@ func TestWriteAuthorityInfoFailsClosedOnInsecurePermissions(t *testing.T) {
 		t.Fatalf("Chmod: %v", err)
 	}
 
-	info, err := NewAuthorityInfo(17890, "v1", false)
+	info, err := NewAuthorityInfo(17890, "v1", "test", false)
 	if err != nil {
 		t.Fatalf("NewAuthorityInfo: %v", err)
 	}

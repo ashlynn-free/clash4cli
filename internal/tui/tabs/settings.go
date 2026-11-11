@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"rocket4cli/internal/i18n"
 	"rocket4cli/internal/netctl"
 	"rocket4cli/internal/proxy"
+	"rocket4cli/internal/tui/components"
 	"rocket4cli/internal/tui/styles"
 )
 
@@ -89,7 +91,36 @@ const (
 	settingsSubPageTUN
 	settingsSubPageSystemProxy
 	settingsSubPageLogs
+	settingsSubPageConnections
 )
+
+// slotConnection is one active connection tagged with its proxy slot.
+type slotConnection struct {
+	SlotID int
+	proxy.ConnectionInfo
+	DownRate int64
+	UpRate   int64
+	// Entry/Transit/Exit describe the real path of the connection:
+	// local mixed port -> dialer node -> exit proxy.
+	Entry   string
+	Transit string
+	Exit    string
+}
+
+type connSample struct {
+	upload   int64
+	download int64
+	at       time.Time
+}
+
+// connectionsLoadedMsg carries a refreshed active-connection snapshot.
+type connectionsLoadedMsg struct {
+	id            int
+	items         []slotConnection
+	uploadTotal   int64
+	downloadTotal int64
+	err           error
+}
 
 // FieldType represents the type of setting field
 type FieldType int
@@ -141,6 +172,16 @@ type SettingsTab struct {
 	systemProxyFocusedField int
 	systemProxyScrollOffset int
 	systemProxyStatus       *netctl.SystemProxyStatus
+
+	// Active connections view
+	connTable         *components.Table
+	connItems         []slotConnection
+	connPrev          map[string]connSample
+	connUploadTotal   int64
+	connDownloadTotal int64
+	connErr           string
+	connLoading       bool
+	connGen           int
 }
 
 type settingField struct {
@@ -437,6 +478,12 @@ func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version strin
 			fieldType: FieldTypeButton,
 			key:       "show_logs",
 		},
+		settingField{
+			label:     "Connections >",
+			helpText:  "View active connections, paths and traffic.",
+			fieldType: FieldTypeButton,
+			key:       "show_connections",
+		},
 	)
 
 	markInputBaselines(fields)
@@ -458,6 +505,8 @@ func NewSettingsTab(cfg *config.Config, slotMgr proxy.SlotService, version strin
 		fields:       fields,
 		focusedField: initialFocus,
 		armedReplace: true,
+		connTable:    components.NewTable(nil),
+		connPrev:     make(map[string]connSample),
 	}
 	tab.slotFields = tab.newSlotSettingsFields()
 	tab.loadSlotUpstreamDraft(0)
@@ -489,7 +538,7 @@ func (t *SettingsTab) HasFocusedInput() bool {
 		return t.focusedTunInputField() != nil
 	case settingsSubPageSystemProxy:
 		return t.focusedSystemProxyInputField() != nil
-	case settingsSubPageSystemInfo, settingsSubPageSlotList, settingsSubPageUpstreamList, settingsSubPageLogs:
+	case settingsSubPageSystemInfo, settingsSubPageSlotList, settingsSubPageUpstreamList, settingsSubPageLogs, settingsSubPageConnections:
 		return false
 	default:
 		return t.focusedInputField() != nil
@@ -866,6 +915,11 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		return t, nil
 	}
 
+	// Active connections secondary page refreshes from the global traffic tick.
+	if t.activeSubPage == settingsSubPageConnections {
+		return t.updateConnections(msg)
+	}
+
 	switch t.activeSubPage {
 	case settingsSubPageUpstreamDetail:
 		return t.updateUpstreamDetail(msg)
@@ -893,6 +947,11 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 'L' {
 			t.activeSubPage = settingsSubPageLogs
 			return t, nil
+		}
+
+		// Uppercase C opens the live connections view.
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 'C' {
+			return t, t.openConnections()
 		}
 
 		if field := t.focusedInputField(); field != nil {
@@ -977,6 +1036,9 @@ func (t *SettingsTab) Update(msg tea.Msg) (*SettingsTab, tea.Cmd) {
 				if field.fieldType == FieldTypeButton && field.key == "show_logs" {
 					t.activeSubPage = settingsSubPageLogs
 					return t, nil
+				}
+				if field.fieldType == FieldTypeButton && field.key == "show_connections" {
+					return t, t.openConnections()
 				}
 			}
 			if t.focusedField == len(t.fields) {
@@ -2477,6 +2539,8 @@ func (t *SettingsTab) View() string {
 		view = t.viewSystemProxySettings()
 	case settingsSubPageLogs:
 		view = t.viewLogs()
+	case settingsSubPageConnections:
+		view = t.viewConnections()
 	default:
 		view = t.viewMain()
 	}
@@ -2639,6 +2703,7 @@ func (t *SettingsTab) viewMain() string {
 				styles.HelpKey.Render("←/→")+styles.HelpText.Render(" select  ")+
 				styles.HelpKey.Render("Enter")+styles.HelpText.Render(" open  ")+
 				styles.HelpKey.Render("L")+styles.HelpText.Render(" logs  ")+
+				styles.HelpKey.Render("C")+styles.HelpText.Render(" connections  ")+
 				styles.HelpKey.Render("Ctrl+R")+styles.HelpText.Render(" restart"),
 			t.width),
 	}
@@ -2696,6 +2761,333 @@ func (t *SettingsTab) viewLogs() string {
 	t.logsTab.SetSize(t.width, height)
 	hint := styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back")
 	return styles.ContentArea.Render(hint + "\n" + t.logsTab.View())
+}
+
+// -- Active connections view --
+
+func (t *SettingsTab) openConnections() tea.Cmd {
+	t.activeSubPage = settingsSubPageConnections
+	t.connGen++
+	t.connItems = nil
+	t.connPrev = make(map[string]connSample)
+	t.connUploadTotal = 0
+	t.connDownloadTotal = 0
+	t.connErr = ""
+	t.connLoading = true
+	if t.connTable == nil {
+		t.connTable = components.NewTable(nil)
+	}
+	t.connTable.SetColumns(connectionColumns(t.width))
+	t.connTable.SetRows(nil)
+	return t.fetchConnections(t.connGen)
+}
+
+// RefreshConnections is called from the global one-second traffic tick. It
+// returns nil unless the connections view is open, so polling stays cheap.
+func (t *SettingsTab) RefreshConnections() tea.Cmd {
+	if t == nil || t.activeSubPage != settingsSubPageConnections {
+		return nil
+	}
+	return t.fetchConnections(t.connGen)
+}
+
+func (t *SettingsTab) updateConnections(msg tea.Msg) (*SettingsTab, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "backspace"))):
+			t.activeSubPage = settingsSubPageNone
+			t.connGen++
+			return t, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+			t.connTable.MoveUp()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+			t.connTable.MoveDown()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
+			return t, t.RefreshConnections()
+		}
+		return t, nil
+	case connectionsLoadedMsg:
+		if msg.id != t.connGen {
+			return t, nil
+		}
+		t.applyConnections(msg)
+		return t, nil
+	}
+	return t, nil
+}
+
+func (t *SettingsTab) fetchConnections(id int) tea.Cmd {
+	slotMgr := t.slotMgr
+	upstreamNames := t.slotUpstreamNames()
+	return func() tea.Msg {
+		msg := connectionsLoadedMsg{id: id}
+		if slotMgr == nil {
+			return msg
+		}
+		var errs []string
+		for _, state := range slotMgr.ActiveSlots() {
+			if state == nil {
+				continue
+			}
+			snapshot, err := slotMgr.GetConnectionsForSlot(state.SlotID)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("slot %d: %v", state.SlotID, err))
+				continue
+			}
+			msg.uploadTotal += snapshot.UploadTotal
+			msg.downloadTotal += snapshot.DownloadTotal
+			for _, info := range snapshot.Connections {
+				// Older daemons may still return mihomo's inner dialer sockets.
+				if strings.EqualFold(info.Type, "Inner") {
+					continue
+				}
+				entry, transit, exit := connectionPath(state, info, upstreamNames[state.SlotID])
+				msg.items = append(msg.items, slotConnection{
+					SlotID:         state.SlotID,
+					ConnectionInfo: info,
+					Entry:          entry,
+					Transit:        transit,
+					Exit:           exit,
+				})
+			}
+		}
+		if len(errs) > 0 {
+			msg.err = fmt.Errorf("%s", strings.Join(errs, "; "))
+		}
+		return msg
+	}
+}
+
+func (t *SettingsTab) applyConnections(msg connectionsLoadedMsg) {
+	now := time.Now()
+	next := make(map[string]connSample, len(msg.items))
+	for i := range msg.items {
+		key := fmt.Sprintf("%d:%s", msg.items[i].SlotID, msg.items[i].ConnectionInfo.ID)
+		if prev, ok := t.connPrev[key]; ok {
+			dt := now.Sub(prev.at).Seconds()
+			if dt > 0 {
+				if msg.items[i].Download >= prev.download {
+					msg.items[i].DownRate = int64(float64(msg.items[i].Download-prev.download) / dt)
+				}
+				if msg.items[i].Upload >= prev.upload {
+					msg.items[i].UpRate = int64(float64(msg.items[i].Upload-prev.upload) / dt)
+				}
+			}
+		}
+		next[key] = connSample{
+			upload:   msg.items[i].Upload,
+			download: msg.items[i].Download,
+			at:       now,
+		}
+	}
+	t.connPrev = next
+
+	sort.SliceStable(msg.items, func(i, j int) bool {
+		left, right := msg.items[i], msg.items[j]
+		if left.SlotID != right.SlotID {
+			return left.SlotID < right.SlotID
+		}
+		if left.Entry != right.Entry {
+			return left.Entry < right.Entry
+		}
+		if left.Transit != right.Transit {
+			return left.Transit < right.Transit
+		}
+		if left.Exit != right.Exit {
+			return left.Exit < right.Exit
+		}
+		return connectionHost(left) < connectionHost(right)
+	})
+
+	t.connItems = msg.items
+	t.connUploadTotal = msg.uploadTotal
+	t.connDownloadTotal = msg.downloadTotal
+	t.connErr = ""
+	if msg.err != nil {
+		t.connErr = msg.err.Error()
+	}
+	t.connLoading = false
+	t.updateConnectionRows()
+}
+
+func (t *SettingsTab) updateConnectionRows() {
+	if t.connTable == nil {
+		return
+	}
+	unit := ""
+	if t.cfg != nil {
+		unit = t.cfg.UI.SpeedUnit
+	}
+	t.connTable.SetColumns(connectionColumns(t.width))
+	rows := make([][]string, 0, len(t.connItems))
+	for _, conn := range t.connItems {
+		rows = append(rows, []string{
+			" " + connectionHost(conn),
+			" " + conn.Entry,
+			" " + conn.Transit,
+			" " + conn.Exit,
+			" " + components.FormatBytes(conn.Download),
+			" " + components.FormatBytes(conn.Upload),
+			" " + components.FormatRateWithUnit(conn.DownRate, unit),
+			" " + components.FormatRateWithUnit(conn.UpRate, unit),
+		})
+	}
+	t.connTable.SetRows(rows)
+}
+
+func connectionColumns(width int) []components.Column {
+	if width < 40 {
+		width = 40
+	}
+	const fixed = 8 + 13 + 13 + 9 + 9 + 9 + 9 // entry, transit, exit, down, up, dl/s, ul/s
+	hostWidth := width - fixed
+	if hostWidth < 10 {
+		hostWidth = 10
+	}
+	return []components.Column{
+		{Title: " Host", Width: hostWidth},
+		{Title: " Entry", Width: 8},
+		{Title: " Transit", Width: 13},
+		{Title: " Exit", Width: 13},
+		{Title: " Down", Width: 9},
+		{Title: " Up", Width: 9},
+		{Title: " DL/s", Width: 9},
+		{Title: " UL/s", Width: 9},
+	}
+}
+
+func connectionHost(c slotConnection) string {
+	host := strings.TrimSpace(c.Host)
+	if host == "" {
+		host = strings.TrimSpace(c.DestinationIP)
+	}
+	if host == "" {
+		return "-"
+	}
+	port := strings.TrimSpace(c.DestinationPort)
+	if port != "" && port != "0" && !strings.HasSuffix(host, ":"+port) {
+		host += ":" + port
+	}
+	return host
+}
+
+// connectionExitProxy returns the actual outbound proxy from a mihomo chain,
+// skipping routing groups such as GLOBAL/Proxy/Auto.
+func connectionExitProxy(chains []string) string {
+	for _, name := range chains {
+		switch name {
+		case "GLOBAL", "Proxy", "Auto":
+			continue
+		}
+		return name
+	}
+	return ""
+}
+
+// connectionPath splits a connection into the physical path shown in the UI:
+// entry (local mixed port), transit (subscription node used as dialer-proxy),
+// and exit (the upstream proxy, or the node itself when no upstream is used).
+func connectionPath(state *proxy.SlotState, info proxy.ConnectionInfo, upstreamName string) (entry, transit, exit string) {
+	entry = "-"
+	upstreamProxy := ""
+	if state != nil {
+		upstreamProxy = fmt.Sprintf("slot-%d-upstream", state.SlotID)
+		if state.Port > 0 {
+			entry = fmt.Sprintf("%d:%d", state.SlotID, state.Port)
+		} else {
+			entry = fmt.Sprintf("%d", state.SlotID)
+		}
+	}
+
+	proxyName := connectionExitProxy(info.Chains)
+	if proxyName == "" {
+		return entry, "-", "-"
+	}
+
+	transit = "-"
+	if proxyName == upstreamProxy {
+		if state.NodeName != "" {
+			transit = state.NodeName
+		}
+		exit = upstreamName
+		if exit == "" && state.UpstreamServer != "" {
+			exit = fmt.Sprintf("%s:%d", state.UpstreamServer, state.UpstreamPort)
+		}
+		if exit == "" {
+			exit = proxyName
+		}
+		return entry, transit, exit
+	}
+
+	return entry, transit, proxyName
+}
+
+// slotUpstreamNames resolves the user-facing upstream label for each slot.
+func (t *SettingsTab) slotUpstreamNames() map[int]string {
+	names := make(map[int]string, proxy.MaxSlots)
+	if t.cfg == nil {
+		return names
+	}
+	for slotID := 0; slotID < proxy.MaxSlots; slotID++ {
+		if name := t.upstreamDisplayName(slotID); name != "" {
+			names[slotID] = name
+		}
+	}
+	return names
+}
+
+func (t *SettingsTab) upstreamDisplayName(slotID int) string {
+	if ref, ok := t.cfg.GetSlotUpstreamRef(slotID); ok && ref != "" {
+		if entry, found := t.cfg.GetUpstreamProxy(ref); found {
+			if label := strings.TrimSpace(entry.Label); label != "" {
+				return label
+			}
+			if entry.Server != "" {
+				return fmt.Sprintf("%s:%d", entry.Server, entry.Port)
+			}
+		}
+		return ""
+	}
+	if upstream, ok := t.cfg.GetSlotUpstream(slotID); ok && upstream.Enabled && upstream.Server != "" {
+		return fmt.Sprintf("%s:%d", upstream.Server, upstream.Port)
+	}
+	return ""
+}
+
+func (t *SettingsTab) viewConnections() string {
+	var lines []string
+	lines = append(lines, styles.Title.Render("Connections"))
+	lines = append(lines, styles.Muted.Render(fmt.Sprintf(
+		"Active: %d   Downloaded: %s   Uploaded: %s",
+		len(t.connItems),
+		components.FormatBytes(t.connDownloadTotal),
+		components.FormatBytes(t.connUploadTotal),
+	)))
+	lines = append(lines, "")
+
+	if t.connLoading && len(t.connItems) == 0 {
+		lines = append(lines, styles.NodeTesting.Render("Loading connections..."))
+	}
+	if len(t.connItems) == 0 && !t.connLoading && t.connErr == "" {
+		lines = append(lines, styles.Muted.Render("No active connections."))
+	}
+	if t.connErr != "" {
+		lines = append(lines, styles.ErrorMessage.Render(t.connErr))
+	}
+	if t.connTable != nil && len(t.connItems) > 0 {
+		tableHeight := t.height - len(lines) - 3
+		if tableHeight < 1 {
+			tableHeight = 1
+		}
+		t.connTable.SetHeight(tableHeight)
+		lines = append(lines, t.connTable.View())
+	}
+
+	help := styles.HelpKey.Render("Esc") + styles.HelpText.Render(" back  ") +
+		styles.HelpKey.Render("↑/↓") + styles.HelpText.Render(" scroll  ") +
+		styles.HelpKey.Render("r") + styles.HelpText.Render(" refresh")
+	return styles.ContentArea.Render(strings.Join(lines, "\n") + "\n" + help)
 }
 
 // fieldIndexByKey returns the index in t.fields for the given key, or -1.
@@ -3048,6 +3440,12 @@ func (t *SettingsTab) SetSize(width, height int) {
 	}
 	if t.logsTab != nil {
 		t.logsTab.SetSize(width, height)
+	}
+	if t.connTable != nil {
+		t.connTable.SetColumns(connectionColumns(width))
+		if len(t.connItems) > 0 {
+			t.updateConnectionRows()
+		}
 	}
 }
 

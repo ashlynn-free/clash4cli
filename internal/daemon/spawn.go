@@ -7,7 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"rocket4cli/internal/logger"
 )
 
 var errDaemonDifferentHome = errors.New("c4cd on the local port belongs to a different CLASH4CLI_HOME")
@@ -28,11 +31,90 @@ func NonPrivilegedFromEnv() bool {
 	return os.Geteuid() != 0
 }
 
-func EnsureDaemon(ctx context.Context) (*Client, *AuthorityInfo, error) {
+// restartDaemonForVersion is a variable so tests can avoid spawning processes.
+var restartDaemonForVersion = RestartDaemon
+
+// EnsureDaemon connects to the daemon, starting one if needed, and guarantees
+// that c4cd reports the same build version as the client. A healthy daemon
+// from a different build is restarted once; if the version still differs after
+// the restart, the client must not continue.
+func EnsureDaemon(ctx context.Context, clientVersion string) (*Client, *AuthorityInfo, error) {
+	client, info, err := ensureDaemon(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if daemonVersionMatches(clientVersion, info) && infoAPIVersionMatches(info) {
+		return client, info, nil
+	}
+
+	runningVersion := daemonVersion(info)
+	logger.Warn("c4cd version %s does not match c4c version %s; restarting c4cd", runningVersion, clientVersion)
+
+	client, info, err = restartDaemonForVersion(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"c4cd version %s does not match c4c version %s and the daemon could not be restarted: %w",
+			runningVersion, clientVersion, err,
+		)
+	}
+	if !daemonVersionMatches(clientVersion, info) {
+		return nil, nil, fmt.Errorf(
+			"c4cd version %s still does not match c4c version %s after restart; install c4c and c4cd from the same build",
+			daemonVersion(info), clientVersion,
+		)
+	}
+	return client, info, nil
+}
+
+// daemonVersionMatches reports whether the daemon's build version satisfies the
+// client. An empty client version cannot be verified and is always accepted; a
+// daemon that predates version reporting never matches a versioned client.
+func daemonVersionMatches(clientVersion string, info *AuthorityInfo) bool {
+	clientVersion = strings.TrimSpace(clientVersion)
+	if clientVersion == "" {
+		return true
+	}
+	return info != nil && strings.TrimSpace(info.Version) == clientVersion
+}
+
+func daemonVersion(info *AuthorityInfo) string {
+	if info == nil || strings.TrimSpace(info.Version) == "" {
+		return "unknown"
+	}
+	return strings.TrimSpace(info.Version)
+}
+
+// infoAPIVersionMatches reports whether the daemon speaks this client's API.
+// Health() normally enforces this, but an incompatible-but-alive daemon is
+// still returned so version negotiation can replace it.
+func infoAPIVersionMatches(info *AuthorityInfo) bool {
+	return info != nil && strings.TrimSpace(info.APIVersion) == APIVersion
+}
+
+// ensureDaemon attaches to a healthy daemon or starts a new one.
+func ensureDaemon(ctx context.Context) (*Client, *AuthorityInfo, error) {
 	client, info, err := LoadClientFromAuthorityInfo()
 	if err == nil {
-		if _, _, healthErr := client.Health(ctx); healthErr == nil {
+		if healthInfo, _, healthErr := client.Health(ctx); healthErr == nil {
+			if healthInfo != nil && healthInfo.PID > 0 {
+				// The authority file can predate a daemon upgrade. Trust the
+				// live daemon (including its reported version) and refresh the
+				// file so version negotiation sees the current build.
+				info = healthInfo
+				_ = WriteDaemonPID(healthInfo.PID)
+				_ = WriteAuthorityInfo(healthInfo)
+			}
 			return client, info, nil
+		} else if live := probeDaemonHealth(info.Port); live != nil && live.PID > 0 && isProcessAlive(live.PID) {
+			// The daemon is alive but its API version is incompatible, so
+			// Health() rejected it. Return its identity anyway; EnsureDaemon
+			// restarts it instead of failing to spawn a duplicate.
+			fingerprint, fpErr := HomeFingerprint()
+			if fpErr == nil && (strings.TrimSpace(live.HomeFingerprint) == "" || live.HomeFingerprint == fingerprint) {
+				_ = WriteDaemonPID(live.PID)
+				_ = WriteAuthorityInfo(live)
+				return client, live, nil
+			}
 		}
 	}
 

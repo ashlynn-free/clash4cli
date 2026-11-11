@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-var errAuthorityAlreadyRunning = errors.New("another c4cd instance is already running")
+var (
+	errAuthorityAlreadyRunning     = errors.New("another c4cd instance is already running")
+	ErrDaemonAlreadyRunningHealthy = errors.New("a healthy c4cd is already running")
+)
 
 type authorityLock struct {
 	path string
@@ -49,7 +53,20 @@ func tryAcquireAuthorityLock(lockPath string) (*authorityLock, error) {
 	return &authorityLock{path: lockPath, file: f}, nil
 }
 
-func ensureSingleAuthority(paths *AuthorityPaths) (*authorityLock, error) {
+func ensureSingleAuthority(paths *AuthorityPaths, probePort int) (*authorityLock, error) {
+	// The authority lock file can go missing while a daemon is still running
+	// (e.g. after orphan recovery), so a successful flock alone is not proof
+	// that no daemon owns the port. Probe the health endpoint first.
+	if probePort > 0 {
+		if live := probeDaemonHealth(probePort); live != nil && live.PID > 0 && isProcessAlive(live.PID) {
+			fingerprint, fpErr := HomeFingerprint()
+			if fpErr == nil && strings.TrimSpace(live.HomeFingerprint) != "" && live.HomeFingerprint != fingerprint {
+				return nil, fmt.Errorf("%w (pid %d, port %d)", errDaemonDifferentHome, live.PID, probePort)
+			}
+			return nil, fmt.Errorf("%w (pid %d, port %d); use 'c4cd --restart' to replace it", ErrDaemonAlreadyRunningHealthy, live.PID, probePort)
+		}
+	}
+
 	lock, err := tryAcquireAuthorityLock(paths.LockPath)
 	if err == nil {
 		return lock, nil
@@ -78,6 +95,12 @@ func ensureSingleAuthority(paths *AuthorityPaths) (*authorityLock, error) {
 		return nil, fmt.Errorf("refusing daemon takeover for pid %d: %w", pid, err)
 	}
 	if isProcessAlive(pid) {
+		// A healthy daemon is not taken over silently. Replacing it requires an
+		// explicit `c4cd --restart` (or --stop) so a running c4c session is not
+		// disconnected by accident.
+		if daemonRespondsAsPID(info, pid) {
+			return nil, fmt.Errorf("%w (pid %d, port %d); use 'c4cd --restart' to replace it", ErrDaemonAlreadyRunningHealthy, pid, info.Port)
+		}
 		if err := terminateExistingProcess(pid, 3*time.Second); err != nil {
 			return nil, fmt.Errorf("failed to kill pid %d: %w", pid, err)
 		}

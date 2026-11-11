@@ -770,12 +770,6 @@ func (c *Controller) SetMode(mode string) error {
 	return nil
 }
 
-type connectionsResponse struct {
-	DownloadTotal int64             `json:"downloadTotal"`
-	UploadTotal   int64             `json:"uploadTotal"`
-	Connections   []json.RawMessage `json:"connections"`
-}
-
 type versionResponse struct {
 	Version string `json:"version"`
 }
@@ -796,56 +790,6 @@ func (c *Controller) doAPI(req *http.Request) (*http.Response, error) {
 func (c *Controller) GetTrafficTotals() (uploadTotal int64, downloadTotal int64, err error) {
 	up, down, _, err := c.GetTrafficAndConnCount()
 	return up, down, err
-}
-
-// GetTrafficAndConnCount returns traffic totals and active connection count.
-func (c *Controller) GetTrafficAndConnCount() (uploadTotal int64, downloadTotal int64, connCount int, err error) {
-	c.mu.RLock()
-	if c.status != StatusRunning {
-		c.mu.RUnlock()
-		return 0, 0, 0, fmt.Errorf("proxy is not running")
-	}
-
-	apiHost := c.apiHost
-	if apiHost == "" {
-		apiHost = "127.0.0.1"
-	}
-	apiPort := c.apiPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
-	secret := c.secret
-	c.mu.RUnlock()
-
-	apiURL := fmt.Sprintf("http://%s:%d/connections", apiHost, apiPort)
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-	if secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
-	}
-
-	resp, err := c.doAPI(req)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to call API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		msg := strings.TrimSpace(string(body))
-		if msg != "" {
-			return 0, 0, 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, msg)
-		}
-		return 0, 0, 0, fmt.Errorf("API returned status %d", resp.StatusCode)
-	}
-
-	var out connectionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to decode response: %w", err)
-	}
-	return out.UploadTotal, out.DownloadTotal, len(out.Connections), nil
 }
 
 // GetCoreVersion returns the mihomo core version string.

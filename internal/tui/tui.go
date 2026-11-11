@@ -714,6 +714,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subsTab != nil {
 			m.subsTab.SetNodeBrowserTraffic(nodeTraffic)
 		}
+		// The settings connections view piggybacks on this one-second tick.
+		if m.activeTab == TabSettings && m.settingsTab != nil {
+			cmds = append(cmds, m.settingsTab.RefreshConnections())
+		}
 
 	case slotActionDoneMsg:
 		if msg.err != nil {

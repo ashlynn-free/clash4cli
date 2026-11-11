@@ -23,6 +23,7 @@ type AuthorityInfo struct {
 	PID             int    `json:"pid"`
 	Port            int    `json:"port"`
 	APIVersion      string `json:"apiVersion"`
+	Version         string `json:"version"`
 	HomeFingerprint string `json:"homeFingerprint"`
 	Executable      string `json:"executable"`
 	StartedAt       string `json:"startedAt"`
@@ -79,7 +80,7 @@ func ExecutableIdentity() (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func NewAuthorityInfo(port int, apiVersion string, privileged bool) (*AuthorityInfo, error) {
+func NewAuthorityInfo(port int, apiVersion, version string, privileged bool) (*AuthorityInfo, error) {
 	fp, err := HomeFingerprint()
 	if err != nil {
 		return nil, err
@@ -92,6 +93,7 @@ func NewAuthorityInfo(port int, apiVersion string, privileged bool) (*AuthorityI
 		PID:             os.Getpid(),
 		Port:            port,
 		APIVersion:      strings.TrimSpace(apiVersion),
+		Version:         strings.TrimSpace(version),
 		HomeFingerprint: fp,
 		Executable:      exe,
 		StartedAt:       time.Now().UTC().Format(time.RFC3339Nano),

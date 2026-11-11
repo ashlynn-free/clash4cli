@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -198,12 +199,31 @@ runCommand:
 	// that cannot be intercepted: running them would silently leak their traffic.
 	plan, err := resolveRunTarget(args, useProxychains)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: cannot run command: %v\033[0m\n", err)
-		if useProxychains {
-			fmt.Fprintf(os.Stderr, "       Refusing to run: its traffic would bypass the proxy.\n")
-			fmt.Fprintf(os.Stderr, "       Install a non-system build (e.g. Homebrew) or use --mode env at your own risk.\n")
+		// Hardened-runtime binaries (e.g. native codex/claude) ignore DYLD
+		// injection, so proxychains can never cover them. In auto mode fall
+		// back to proxy environment variables; the strict sandbox still keeps
+		// their unproxied traffic from leaving the machine.
+		var blocked *notInterceptableError
+		if useProxychains && runMode == "auto" && runtime.GOOS == "darwin" && errors.As(err, &blocked) {
+			useProxychains = false
+			plan, err = resolveRunTarget(args, false)
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "\033[33m[c4cgo] Warning: %s uses the macOS hardened runtime; DYLD injection is ignored.\033[0m\n", blocked.path)
+				fmt.Fprintf(os.Stderr, "\033[33m         Falling back to environment-variable proxy mode (the app must honor HTTP(S)_PROXY/ALL_PROXY).\033[0m\n")
+			}
 		}
-		os.Exit(1)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\033[31m[c4cgo] Error: cannot run command: %v\033[0m\n", err)
+			if useProxychains {
+				fmt.Fprintf(os.Stderr, "       Refusing to run: its traffic would bypass the proxy.\n")
+				if errors.As(err, &blocked) {
+					fmt.Fprintf(os.Stderr, "       Use --mode env so the app can reach the proxy through environment variables.\n")
+				} else {
+					fmt.Fprintf(os.Stderr, "       Install a non-system build (e.g. Homebrew) or use --mode env at your own risk.\n")
+				}
+			}
+			os.Exit(1)
+		}
 	}
 
 	// On Linux we inject the library directly. A wrong-architecture preload is
@@ -307,6 +327,10 @@ Safety:
   and statically linked/setuid binaries can bypass the proxy. On macOS,
   --strict uses a kernel sandbox to deny all remote network except the proxy,
   so leaks fail closed. On Linux, use mihomo TUN mode for full coverage.
+
+  macOS hardened-runtime binaries (for example the native claude and codex
+  builds) ignore DYLD injection. In auto mode c4cgo detects this and falls
+  back to proxy environment variables; use --mode env to force that mode.
 
 Note: Make sure c4cd is running and a slot is active.
 `, Version)

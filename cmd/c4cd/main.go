@@ -85,8 +85,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
-	server := daemon.NewServer(cfg, slotMgr)
+	server := daemon.NewServer(cfg, slotMgr, Version)
 	if err := server.Start(ctx); err != nil {
+		if errors.Is(err, daemon.ErrDaemonAlreadyRunningHealthy) {
+			fmt.Println(err.Error())
+			return
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -109,6 +113,9 @@ Usage:
   c4cd --restart      Restart the daemon in the background
   c4cd -v             Show version
   c4cd -h             Show this help
+
+If a healthy daemon is already running, c4cd prints its PID and exits without
+replacing it. Use c4cd --restart to replace it explicitly.
 
 The daemon exposes a localhost-only control API and owns runtime slot state.
 c4cd --stop verifies the daemon identity before terminating it, stops all

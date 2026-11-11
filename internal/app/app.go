@@ -26,16 +26,16 @@ import (
 
 // App represents the main application
 type App struct {
-	cfg            *config.Config
-	subManager     *subscription.Manager
-	nodeMgr        *node.Manager
-	slotMgr        proxy.SlotService
-	version        string
-	startupWarn    string
-	daemonClient   *daemon.Client
-	daemonInfo     *daemon.AuthorityInfo
-	daemonLogCh    <-chan logger.Entry
-	stopDaemonLog  func()
+	cfg           *config.Config
+	subManager    *subscription.Manager
+	nodeMgr       *node.Manager
+	slotMgr       proxy.SlotService
+	version       string
+	startupWarn   string
+	daemonClient  *daemon.Client
+	daemonInfo    *daemon.AuthorityInfo
+	daemonLogCh   <-chan logger.Entry
+	stopDaemonLog func()
 }
 
 // New creates a new application instance
@@ -64,12 +64,12 @@ func New(version string) (*App, error) {
 	}
 
 	nodeMgr := node.NewManager(subManager, cfg.SpeedTest.Concurrent, cfg.SpeedTest.Timeout)
-	client, info, err := daemon.EnsureDaemon(context.Background())
+	client, info, err := daemon.EnsureDaemon(context.Background(), version)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect or start c4cd: %w", err)
 	}
 	slotMgr := proxy.SlotService(newDaemonSlotService(client))
-	
+
 	var daemonLogCh <-chan logger.Entry
 	var stopDaemonLog func()
 	if client != nil {
@@ -146,16 +146,16 @@ func New(version string) (*App, error) {
 	}
 
 	return &App{
-		cfg:            cfg,
-		subManager:     subManager,
-		nodeMgr:        nodeMgr,
-		slotMgr:        slotMgr,
-		version:        version,
-		startupWarn:    startupWarn,
-		daemonClient:   client,
-		daemonInfo:     info,
-		daemonLogCh:    daemonLogCh,
-		stopDaemonLog:  stopDaemonLog,
+		cfg:           cfg,
+		subManager:    subManager,
+		nodeMgr:       nodeMgr,
+		slotMgr:       slotMgr,
+		version:       version,
+		startupWarn:   startupWarn,
+		daemonClient:  client,
+		daemonInfo:    info,
+		daemonLogCh:   daemonLogCh,
+		stopDaemonLog: stopDaemonLog,
 	}, nil
 }
 
