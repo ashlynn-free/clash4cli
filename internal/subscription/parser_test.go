@@ -247,7 +247,7 @@ func TestParse_URIList_VLESS(t *testing.T) {
 }
 
 func TestParse_URIList_VLESS_TCPHTTPMapsToHTTPTransport(t *testing.T) {
-	content := []byte("vless://52765b6a-1bba-4291-a3c7-281285df13f1@crazyland.zsh2401.top:32612?type=tcp&encryption=none&path=%2F&headerType=http&security=none#luvjqzgb\n")
+	content := []byte("vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp&encryption=none&path=%2F&headerType=http&security=none#test-node\n")
 
 	nodes, err := Parse(content)
 	if err != nil {

@@ -331,7 +331,7 @@ func TestManager_CustomNodesCRUD(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	added, err := m.AddCustomNodes("vless://52765b6a-1bba-4291-a3c7-281285df13f1@crazyland.zsh2401.top:32612?type=tcp&encryption=none&path=%2F&headerType=http&security=none#luvjqzgb\n")
+	added, err := m.AddCustomNodes("vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp&encryption=none&path=%2F&headerType=http&security=none#test-node\n")
 	if err != nil {
 		t.Fatalf("AddCustomNodes: %v", err)
 	}
